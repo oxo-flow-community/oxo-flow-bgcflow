@@ -1,0 +1,18 @@
+name: bgc_analytics
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # Pinned subset of upstream envs/bgc_analytics.yaml: only packages imported
+  # by the scripts on the default main path (pandas/pyarrow/biopython/
+  # alive_progress/requests). Upstream used unpinned ranges; this port pins
+  # exact versions per the oxo-flow community porting policy.
+  - python=3.9.18
+  - pandas=2.0.3
+  - pyarrow=14.0.2
+  - biopython=1.81
+  - requests=2.31.0
+  - pip
+  - pip:
+      - alive_progress==3.1.5

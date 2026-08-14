@@ -1,0 +1,522 @@
+# oxo-flow port of NBChub/bgcflow v1.1.2 (snakemake) — default main path.
+# Faithful replication of the default-parameters execution path:
+#   genomes input -> annotation (prokka) -> antiSMASH -> BGC comparison
+#   preparation + summary tables -> data warehouse parquet.
+# Upstream rules NOT in the default path (off by default in config.yaml):
+#   seqfu, mash, fastani, checkm, gtdbtk, bigscape, bigslice, automlst,
+#   arts, roary, eggnog, deeptfactor, cblaster, gecco, amrfinderplus,
+#   metabase, ncbi/patric sources, report notebooks, antismash v6 branch.
+#
+# Adaptation notes (oxo-flow has no `{log}` placeholder): upstream `{log}`
+# is substituted with the rule's explicit log path and the log parent
+# directory is created with `mkdir -p` (Snakemake does this automatically).
+
+[workflow]
+name = "bgcflow"
+version = "1.1.2"
+description = "Biosynthetic gene cluster analysis across genomes — oxo-flow port of NBChub/bgcflow: genome input, prokka annotation, antiSMASH, BGC comparison prep, summary tables, data warehouse"
+author = "oxo-flow-community"
+
+[config]
+# Project / input genomes (upstream: config.yaml `projects` + data/raw/fasta)
+project = "genomes"                    # the single ported project (upstream config project name)
+raw_dir = "test/fixtures/raw"          # directory containing fasta/<genome_id>.fna
+samples_csv = "config/samples.csv"     # sample table (upstream: config/<project>/samples.csv)
+input_type = "fna"                     # upstream get_input_location(): fna | gbk
+# antiSMASH (upstream rule_parameters.antismash + envs/antismash.yaml)
+antismash_major = "7"                  # 6 or 7 (selects the v6/v7 rule branches)
+antismash_version = "7.1.0"            # derived from envs/antismash.yaml pip pin git@7-1-0-1
+antismash_db_path = "resources/antismash_db"   # upstream resources_path.antismash_db
+antismash_taxon = "bacteria"           # upstream env var BGCFLOW_ANTISMASH_MODE
+# GTDB taxonomy (upstream rule_parameters.install_gtdbtk + use_gtdb_api)
+gtdb_release = "220.0"                 # GTDB release (e.g. 214.1, 220.0)
+gtdb_release_major = "220"             # GTDB release major version (upstream: release.split('.')[0])
+gtdb_release_version = "r220"          # GTDB release id (e.g. r214, r220)
+gtdb_api_base = "https://gtdb-api.ecogenomic.org"
+gtdb_offline = "False"                 # upstream: use_gtdb_api False -> offline mode
+gtdb_tax_paths = "[]"                  # upstream GTDB_PATHS: space-separated user gtdb-tax tsv(s)
+# BGCflow housekeeping
+bgcflow_version = "1.1.2"              # upstream __version__ (format_genbank_meta arg)
+mibig_version = "3.1"                  # MIBiG JSON release used by get_mibig_table
+bgc_dataset = "data/interim/bgcs/datasets.tsv"
+
+[[sample_groups]]
+name = "genomes"
+samples = ["S1", "S2"]
+
+# ---------------------------------------------------------------------------
+# 1. Genome input + prokka annotation chain
+#    (upstream: rules/prokka.smk copy_custom_fasta / extract_meta_prokka /
+#     prokka, rules/gtdb.smk gtdb_prep, rules/convert_genbank.smk format_gbk)
+# ---------------------------------------------------------------------------
+
+[[rules]]
+name = "copy_custom_fasta"
+description = "Copy user-provided genome FASTA files into the interim fasta directory"
+input = ["{config.raw_dir}/fasta/{sample}.fna"]
+output = ["data/interim/fasta/{sample}.fna"]
+log = "logs/prokka/copy_custom_fasta/copy_custom_fasta-{sample}.log"
+tags = ["input", "genomes"]
+shell = """
+mkdir -p logs/prokka/copy_custom_fasta
+if [[ {input} == *.fna || {input} == *.fasta || {input} == *.fa ]]
+then
+    cp {input} {output} 2>> logs/prokka/copy_custom_fasta/copy_custom_fasta-{sample}.log
+else
+    echo "ERROR: Wrong Extension:" {input} >> logs/prokka/copy_custom_fasta/copy_custom_fasta-{sample}.log
+    exit 1
+fi
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "gtdb_prep"
+description = "Fetch GTDB taxonomy information for a genome (GTDB API, with offline table fallback)"
+output = ["data/interim/gtdb/{sample}.json"]
+log = "logs/gtdb/gtdb_prep/gtdb_prep-{sample}.log"
+tags = ["taxonomy", "gtdb"]
+shell = """
+mkdir -p logs/gtdb/gtdb_prep
+if python scripts/gtdb_prep.py {sample} {output[0]} '{config.samples_csv}' '{config.gtdb_tax_paths}' R{config.gtdb_release_major} {config.gtdb_offline} {config.gtdb_api_base} 2> logs/gtdb/gtdb_prep/gtdb_prep-{sample}.log; then
+    echo "gtdb_prep.py executed successfully" >> logs/gtdb/gtdb_prep/gtdb_prep-{sample}.log
+else
+    echo "gtdb_prep.py failed, getting dataset from table instead..." >> logs/gtdb/gtdb_prep/gtdb_prep-{sample}.log
+    if [ ! -f resources/gtdb_download/bac120_metadata_r{config.gtdb_release_major}.tsv ]; then
+        echo "Downloading GTDB table from https://data.gtdb.ecogenomic.org/releases/release{config.gtdb_release_major}/{config.gtdb_release}/bac120_metadata_r{config.gtdb_release_major}.tsv.gz" >> logs/gtdb/gtdb_prep/gtdb_prep-{sample}.log
+        mkdir -p resources/gtdb_download/
+        wget -P resources/gtdb_download/ https://data.gtdb.ecogenomic.org/releases/release{config.gtdb_release_major}/{config.gtdb_release}/bac120_metadata_r{config.gtdb_release_major}.tsv.gz -nc 2>> logs/gtdb/gtdb_prep/gtdb_prep-{sample}.log
+        gunzip -c resources/gtdb_download/bac120_metadata_r{config.gtdb_release_major}.tsv.gz > resources/gtdb_download/bac120_metadata_r{config.gtdb_release_major}.tsv 2>> logs/gtdb/gtdb_prep/gtdb_prep-{sample}.log
+    fi
+    echo "Running gtdb_prep_from_table.py" >> logs/gtdb/gtdb_prep/gtdb_prep-{sample}.log
+    python scripts/gtdb_prep_from_table.py {sample} resources/gtdb_download/bac120_metadata_r{config.gtdb_release_major}.tsv R{config.gtdb_release_major} {output[0]} 2>> logs/gtdb/gtdb_prep/gtdb_prep-{sample}.log
+fi
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "extract_meta_prokka"
+description = "Extract organism metadata (genus, species, strain) from the sample table for prokka"
+input = ["data/interim/fasta/{sample}.fna"]
+output = ["data/interim/prokka/{sample}/organism_info.txt"]
+log = "logs/prokka/extract_meta_prokka/extract_meta_prokka-{sample}.log"
+tags = ["annotation"]
+shell = """
+mkdir -p logs/prokka/extract_meta_prokka
+python scripts/get_organism_info.py {sample} "{config.samples_csv}" data/interim/assembly_report/ data/interim/prokka/ 2>> logs/prokka/extract_meta_prokka/extract_meta_prokka-{sample}.log
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "prokka"
+description = "Annotate the genome with prokka (upstream annotation step feeding antiSMASH)"
+input = ["data/interim/fasta/{sample}.fna", "data/interim/prokka/{sample}/organism_info.txt"]
+output = [
+    "data/interim/prokka/{sample}/{sample}.gff",
+    "data/interim/prokka/{sample}/{sample}.faa",
+    "data/interim/prokka/{sample}/{sample}.gbk",
+    "data/interim/prokka/{sample}/{sample}.txt",
+    "data/interim/prokka/{sample}/{sample}.tsv",
+]
+log = "logs/prokka/prokka/prokka-{sample}.log"
+tags = ["annotation"]
+shell = """
+mkdir -p logs/prokka/prokka
+prokka --outdir data/interim/prokka/{sample} --force \
+    --prefix {sample} --genus "`cut -d "," -f 1 {input[1]}`" \
+    --species "`cut -d "," -f 2 {input[1]}`" --strain "`cut -d "," -f 3 {input[1]}`" \
+    --cdsrnaolap --cpus {threads} --increment 10 \
+    --evalue 1e-05 {input[0]} &> logs/prokka/prokka/prokka-{sample}.log
+"""
+
+[rules.resources]
+threads = 4
+
+[rules.environment]
+conda = "envs/prokka.yaml"
+
+[[rules]]
+name = "format_gbk"
+description = "Add BGCflow metadata comments to the prokka genbank file (upstream format_gbk)"
+input = ["data/interim/prokka/{sample}/{sample}.gbk", "data/interim/gtdb/{sample}.json"]
+output = ["data/interim/processed-genbank/{sample}.gbk"]
+log = "logs/prokka/format_gbk/format_gbk-{sample}.log"
+tags = ["annotation"]
+shell = """
+mkdir -p logs/prokka/format_gbk
+python scripts/format_genbank_meta.py {input[0]} \
+    {config.bgcflow_version} {input[1]} {sample} {output[0]} 2> logs/prokka/format_gbk/format_gbk-{sample}.log
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+# ---------------------------------------------------------------------------
+# 2. antiSMASH (upstream: rules/antismash.smk, v7 branch)
+# ---------------------------------------------------------------------------
+
+[[rules]]
+name = "antismash_db_setup"
+description = "Download the antiSMASH databases and prepare them (upstream antismash_db_setup v7)"
+output = [
+    "resources/antismash_db/as-js/0.13",
+    "resources/antismash_db/clusterblast",
+    "resources/antismash_db/clustercompare/mibig/3.1",
+    "resources/antismash_db/comparippson/asdb/4.0",
+    "resources/antismash_db/comparippson/mibig/3.1",
+    "resources/antismash_db/knownclusterblast/3.1",
+    "resources/antismash_db/nrps_pks/stachelhaus/1.1",
+    "resources/antismash_db/nrps_pks/svm/2.0",
+    "resources/antismash_db/nrps_pks/transATor/2023.02.23",
+    "resources/antismash_db/pfam/35.0",
+    "resources/antismash_db/resfam",
+    "resources/antismash_db/tigrfam",
+]
+log = "logs/antismash/antismash_db_setup.log"
+tags = ["antismash", "database"]
+shell = """
+mkdir -p logs/antismash
+download-antismash-databases --database-dir {config.antismash_db_path} &>> logs/antismash/antismash_db_setup.log
+antismash --version >> logs/antismash/antismash_db_setup.log
+antismash --database {config.antismash_db_path} --prepare-data &>> logs/antismash/antismash_db_setup.log
+"""
+
+[rules.environment]
+conda = "envs/antismash.yaml"
+
+[[rules]]
+name = "antismash"
+description = "Run antiSMASH v7 on the annotated genome (region detection with reuse-result retry)"
+input = ["data/interim/processed-genbank/{sample}.gbk"]
+output = [
+    "data/interim/antismash/{config.antismash_version}/{sample}/{sample}.gbk",
+    "data/interim/antismash/{config.antismash_version}/{sample}/{sample}.json",
+    "data/interim/antismash/{config.antismash_version}/{sample}/{sample}.zip",
+]
+depends_on = ["antismash_db_setup"]
+log = "logs/antismash/antismash/{config.antismash_version}/antismash_{config.antismash_version}-{sample}.log"
+tags = ["antismash", "genome-mining"]
+shell = """
+set +e
+
+mkdir -p logs/antismash/antismash/{config.antismash_version}
+
+# Find the latest existing JSON output for this strain
+latest_json=$(find data/interim/antismash/*/* -name "{sample}.json" | sort -V | tail -n 1) 2>> logs/antismash/antismash/{config.antismash_version}/antismash_{config.antismash_version}-{sample}.log
+if [ -n "$latest_json" ]; then
+    # Use existing JSON result as starting point
+    echo "Using existing JSON from $latest_json as starting point..." >> logs/antismash/antismash/{config.antismash_version}/antismash_{config.antismash_version}-{sample}.log
+    antismash_input="--reuse-result $latest_json"
+else
+    # No existing JSON result found, start AntiSMASH from scratch
+    echo "No existing JSON result found, starting AntiSMASH from scratch..." >> logs/antismash/antismash/{config.antismash_version}/antismash_{config.antismash_version}-{sample}.log
+    antismash_input="{input[0]}"
+fi
+
+# Store common parameters in a variable
+antismash_params="--genefinding-tool none \
+    --output-dir data/interim/antismash/{config.antismash_version}/{sample} \
+    --database {config.antismash_db_path} \
+    --taxon {config.antismash_taxon} \
+    --cb-knownclusters \
+    --cb-subclusters \
+    --cc-mibig \
+    --clusterhmmer \
+    --tigrfam \
+    --pfam2go \
+    --rre \
+    --asf \
+    --tfbs \
+    -c {threads} \
+    --logfile logs/antismash/antismash/{config.antismash_version}/antismash_{config.antismash_version}-{sample}.log"
+
+# Run AntiSMASH
+echo "Running AntiSMASH {config.antismash_taxon} mode..." >> logs/antismash/antismash/{config.antismash_version}/antismash_{config.antismash_version}-{sample}.log
+antismash $antismash_params $antismash_input 2>> logs/antismash/antismash/{config.antismash_version}/antismash_{config.antismash_version}-{sample}.log
+
+# Check if the run failed due to changed detection results or changed protocluster types
+if grep -q -e "ValueError: Detection results have changed. No results can be reused" \
+        -e "RuntimeError: Protocluster types supported by HMM detection have changed, all results invalid" \
+        logs/antismash/antismash/{config.antismash_version}/antismash_{config.antismash_version}-{sample}.log
+then
+    # Use genbank input instead
+    echo "Previous JSON result is invalid, starting AntiSMASH from scratch..." >> logs/antismash/antismash/{config.antismash_version}/antismash_{config.antismash_version}-{sample}.log
+    antismash $antismash_params {input[0]} 2>> logs/antismash/antismash/{config.antismash_version}/antismash_{config.antismash_version}-{sample}.log
+fi
+"""
+
+[rules.resources]
+threads = 4
+
+[rules.environment]
+conda = "envs/antismash.yaml"
+
+[[rules]]
+name = "copy_antismash"
+description = "Symlink antiSMASH results from interim into the project processed directory (upstream copy_antismash)"
+input = ["data/interim/antismash/{config.antismash_version}/{sample}"]
+output = ["data/processed/{group}/antismash/{config.antismash_version}/{sample}"]
+depends_on = ["antismash"]
+log = "logs/antismash/copy_antismash/copy_antismash_{config.antismash_version}-{sample}-{group}.log"
+tags = ["antismash"]
+shell = """
+mkdir -p logs/antismash/copy_antismash
+base_dir=$PWD
+mkdir {output[0]}
+(cd {output[0]} && for item in $(ls $base_dir/{input[0]}); do ln -s $base_dir/{input[0]}/$item $(basename $item); done) 2>> logs/antismash/copy_antismash/copy_antismash_{config.antismash_version}-{sample}-{group}.log
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+# ---------------------------------------------------------------------------
+# 3. BGC aggregation + comparison preparation (upstream: rules/bgc_analytics.smk,
+#    rules/bgc.smk downstream_bgc_prep, rules/gtdb.smk fix_gtdb_taxonomy)
+# ---------------------------------------------------------------------------
+
+[[rules]]
+name = "bgc_count"
+description = "Count BGCs per genome from the antiSMASH genbank (upstream bgc_count)"
+input = ["data/interim/antismash/{config.antismash_version}/{sample}/{sample}.gbk"]
+output = ["data/interim/antismash/{config.antismash_version}/{sample}_bgc_counts.json"]
+log = "logs/bgc_analytics/bgc_counts/as_{config.antismash_version}_{sample}.log"
+tags = ["antismash", "bgc"]
+shell = """
+mkdir -p logs/bgc_analytics/bgc_counts
+python scripts/get_bgc_counts.py {input[0]} {sample} {output[0]} 2>> logs/bgc_analytics/bgc_counts/as_{config.antismash_version}_{sample}.log
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "antismash_overview"
+description = "Extract the BGC overview from the antiSMASH JSON (upstream antismash_overview)"
+input = ["data/interim/antismash/{config.antismash_version}/{sample}/{sample}.json"]
+output = ["data/interim/antismash/{config.antismash_version}/{sample}_bgc_overview.json"]
+temp_output = ["data/interim/antismash/{config.antismash_version}/{sample}_bgc_overview.json"]
+log = "logs/bgc_analytics/bgc_overview/as_{config.antismash_version}_{sample}.log"
+tags = ["antismash", "bgc"]
+shell = """
+mkdir -p logs/bgc_analytics/bgc_overview
+python scripts/get_antismash_overview.py {input[0]} {output[0]} {sample} 2>> logs/bgc_analytics/bgc_overview/as_{config.antismash_version}_{sample}.log
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "fix_gtdb_taxonomy"
+description = "Merge per-genome GTDB taxonomy JSONs into the project taxonomy table (upstream fix_gtdb_taxonomy)"
+input = []
+expand_inputs = [
+    { pattern = "data/interim/gtdb/{sample}.json", variables = { sample = "config.samples_list" } }
+]
+output = ["data/processed/{config.project}/tables/df_gtdb_meta.csv"]
+log = "logs/gtdb/fix_gtdb_taxonomy/fix_gtdb_taxonomy-{config.project}.log"
+tags = ["taxonomy", "gtdb"]
+shell = """
+mkdir -p logs/gtdb/fix_gtdb_taxonomy
+TMPDIR="data/interim/tmp/{config.project}"
+mkdir -p $TMPDIR
+INPUT_JSON="$TMPDIR/df_gtdb.txt"
+echo '{input}' > $INPUT_JSON
+python scripts/fix_gtdb_taxonomy.py $INPUT_JSON {output[0]} 2> logs/gtdb/fix_gtdb_taxonomy/fix_gtdb_taxonomy-{config.project}.log
+rm $INPUT_JSON
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "downstream_bgc_prep"
+description = "Prepare BGCs for downstream comparison: symlinks, taxonomy, dataset registry, mapping (upstream downstream_bgc_prep)"
+input = []
+expand_inputs = [
+    { pattern = "data/interim/antismash/{config.antismash_version}/{sample}/{sample}.gbk", variables = { sample = "config.samples_list" } }
+]
+output = [
+    "data/interim/bgcs/{config.project}/{config.antismash_version}/input_list.txt",
+    "data/interim/bgcs/taxonomy/taxonomy_{config.project}_antismash_{config.antismash_version}.tsv",
+    "data/interim/bgcs/{config.project}/{config.antismash_version}/",
+    "data/interim/bgcs/{config.project}/{config.project}_antismash_{config.antismash_version}.csv",
+]
+depends_on = ["fix_gtdb_taxonomy"]
+log = "logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log"
+tags = ["bgc", "comparison"]
+shell = """
+mkdir -p logs/bgcs/downstream_bgc_prep/{config.project}
+echo "Preparing BGCs for {config.project} downstream analysis..." >> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+
+echo "Step 1. Generate symlink for each regions in genomes in dataset" >> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+echo {input} | tr ' ' '\\n' >> {output[0]} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+find data/interim/antismash/{config.antismash_version} -name "*.region*.gbk" | sort >> {output[0]} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+python scripts/bgc_downstream_prep_selection.py {output[0]} {output[2]} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+
+echo "Step 2. Generate taxonomic information for dataset" >> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+python scripts/bigslice_prep.py data/processed/{config.project}/tables/df_gtdb_meta.csv {output[1]} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+# append new dataset information
+## check if previous dataset exists
+if [[ -s {config.bgc_dataset} ]]
+then
+    echo "Previous dataset detected, appending dataset information for {config.project}..." >> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+    sed -i 'a {config.project}_antismash_{config.antismash_version}\\t{config.project}_antismash_{config.antismash_version}\\ttaxonomy/taxonomy_{config.project}_antismash_{config.antismash_version}.tsv\\t{config.project}' {config.bgc_dataset} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+else
+    echo "No previous dataset detected, generating dataset information for {config.project}..." >> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+    echo -e '# Dataset name\\tPath to folder\\tPath to taxonomy\\tDescription' > {config.bgc_dataset} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+    sed -i 'a {config.project}_antismash_{config.antismash_version}\\t{config.project}_antismash_{config.antismash_version}\\ttaxonomy/taxonomy_{config.project}_antismash_{config.antismash_version}.tsv\\t{config.project}' {config.bgc_dataset} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+fi
+echo "Step 3. Generate mapping for visualization" >> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+python scripts/get_bigscape_mapping.py {output[2]} {output[3]} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "antismash_overview_gather"
+description = "Gather per-genome BGC overviews into the regions table (upstream antismash_overview_gather)"
+input = []
+expand_inputs = [
+    { pattern = "data/interim/antismash/{config.antismash_version}/{sample}_bgc_overview.json", variables = { sample = "config.samples_list" } }
+]
+output = ["data/processed/{config.project}/tables/df_regions_antismash_{config.antismash_version}.csv"]
+depends_on = ["downstream_bgc_prep"]
+log = "logs/bgc_analytics/antismash_overview_gather-{config.antismash_version}-{config.project}.log"
+tags = ["bgc", "comparison"]
+shell = """
+mkdir -p logs/bgc_analytics
+TMPDIR="data/interim/bgcs/{config.project}/tmp/{config.antismash_version}"
+mkdir -p $TMPDIR
+INPUT_JSON="$TMPDIR/df_regions_antismash.txt"
+echo '{input}' > $INPUT_JSON
+python scripts/get_antismash_overview_gather.py \
+    $INPUT_JSON data/interim/bgcs/{config.project}/{config.antismash_version} {output[0]} 2>> logs/bgc_analytics/antismash_overview_gather-{config.antismash_version}-{config.project}.log
+rm $INPUT_JSON
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "copy_log_changes"
+description = "Copy the antiSMASH change logs into the processed directory (upstream copy_log_changes)"
+input = ["data/interim/bgcs/{config.project}/{config.antismash_version}"]
+output = ["data/processed/{config.project}/log_changes/{config.antismash_version}"]
+depends_on = ["downstream_bgc_prep"]
+log = "logs/bgcs/downstream_bgc_prep/{config.project}/copy_log_changes-{config.antismash_version}.log"
+tags = ["bgc", "comparison"]
+shell = """
+mkdir -p logs/bgcs/downstream_bgc_prep/{config.project}
+mkdir -p {output[0]} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/copy_log_changes-{config.antismash_version}.log
+cp data/interim/bgcs/{config.project}/{config.antismash_version}/*/*-change_log.json {output[0]}/. 2>> logs/bgcs/downstream_bgc_prep/{config.project}/copy_log_changes-{config.antismash_version}.log
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "antismash_summary"
+description = "Build the antiSMASH summary table for the project (upstream antismash_summary)"
+input = [
+    "data/processed/{config.project}/log_changes/{config.antismash_version}",
+    "data/processed/{config.project}/tables/df_regions_antismash_{config.antismash_version}.csv",
+]
+expand_inputs = [
+    { pattern = "data/interim/antismash/{config.antismash_version}/{sample}_bgc_counts.json", variables = { sample = "config.samples_list" } },
+    { pattern = "data/processed/{config.project}/antismash/{config.antismash_version}/{sample}", variables = { sample = "config.samples_list" } },
+]
+output = ["data/processed/{config.project}/tables/df_antismash_{config.antismash_version}_summary.csv"]
+log = "logs/bgc_analytics/antismash_summary-{config.antismash_version}-{config.project}.log"
+tags = ["antismash", "summary"]
+shell = """
+mkdir -p logs/bgc_analytics
+TMPDIR="data/interim/tmp/{config.project}/{config.antismash_version}"
+mkdir -p $TMPDIR
+INPUT_JSON="$TMPDIR/df_bgc_counts.txt"
+echo '{input}' > $INPUT_JSON
+python scripts/make_genome_dataset.py $INPUT_JSON '{config.samples_csv}' {output[0]} 2>> logs/bgc_analytics/antismash_summary-{config.antismash_version}-{config.project}.log
+rm $INPUT_JSON
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+# ---------------------------------------------------------------------------
+# 4. MIBiG reference table + data warehouse (upstream: rules/bgc_analytics.smk
+#    get_mibig_table, rules/data_warehouse.smk)
+# ---------------------------------------------------------------------------
+
+[[rules]]
+name = "get_mibig_table"
+description = "Download the MIBiG JSON collection and build the reference BGC table (upstream get_mibig_table)"
+output = [
+    "resources/mibig/json/",
+    "resources/mibig/df_mibig_bgcs.csv",
+]
+log = "logs/bigscape/get_mibig_table.log"
+tags = ["mibig", "database"]
+shell = """
+mkdir -p logs/bigscape
+
+# Define the MIBiG tar.gz file path
+TAR_GZ_FILE="resources/mibig_json_{config.mibig_version}.tar.gz"
+
+# Check if the tar.gz file exists and remove it if it does
+if [ -f "$TAR_GZ_FILE" ]; then
+    rm "$TAR_GZ_FILE"
+fi
+
+# Download the tar.gz file
+(cd resources && wget https://dl.secondarymetabolites.org/mibig/mibig_json_{config.mibig_version}.tar.gz -nc) &>> logs/bigscape/get_mibig_table.log
+
+# Extract the tar.gz file and organize the contents
+(cd resources && tar -xvf mibig_json_{config.mibig_version}.tar.gz && mkdir -p mibig && mv mibig_json_{config.mibig_version}/ mibig/json && rm mibig_json_{config.mibig_version}.tar.gz) &>> logs/bigscape/get_mibig_table.log
+
+# Run the Python script to convert into table
+python scripts/get_mibig_data.py resources/mibig/json/ {output[1]} 2>> logs/bigscape/get_mibig_table.log
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "copy_mibig_table"
+description = "Copy the MIBiG table into the project processed tables (upstream copy_mibig_table)"
+input = ["resources/mibig/df_mibig_bgcs.csv"]
+output = ["data/processed/{config.project}/tables/df_mibig_bgcs.csv"]
+temp_output = ["data/processed/{config.project}/tables/df_mibig_bgcs.csv"]
+log = "logs/data_warehouse/{config.project}/copy_mibig.log"
+tags = ["mibig"]
+shell = """
+mkdir -p logs/data_warehouse/{config.project}
+cp {input[0]} {output[0]} 2>> logs/data_warehouse/{config.project}/copy_mibig.log
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "csv_to_parquet"
+description = "Convert all project CSV tables to parquet for the data warehouse (upstream csv_to_parquet)"
+input = [
+    "data/processed/{config.project}/tables/df_antismash_{config.antismash_version}_summary.csv",
+    "data/processed/{config.project}/tables/df_mibig_bgcs.csv",
+    "data/processed/{config.project}/tables/df_gtdb_meta.csv",
+]
+output = ["data/processed/{config.project}/data_warehouse/tables/df_mibig_bgcs.parquet"]
+log = "logs/data_warehouse/{config.project}/convert_to_parquet.log"
+tags = ["data-warehouse"]
+shell = """
+mkdir -p logs/data_warehouse/{config.project}
+python scripts/csv_to_parquet.py data/processed/{config.project} 2>> logs/data_warehouse/{config.project}/convert_to_parquet.log
+touch {output[0]}
+"""
+
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
