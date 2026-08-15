@@ -1,23 +1,95 @@
-# BGCflow (port)
+# oxo-flow-bgcflow — Biosynthetic gene cluster (BGC) genome mining: annotation, antiSMASH and data warehouse
 
 [![CI](https://github.com/oxo-flow-community/oxo-flow-bgcflow/actions/workflows/ci.yml/badge.svg)](https://github.com/oxo-flow-community/oxo-flow-bgcflow/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-Biosynthetic gene cluster (BGC) analysis across genomes: prokka annotation of
-user-provided genomes, antiSMASH 7 secondary-metabolite mining with database
-setup, BGC overview/count/summary aggregation, GTDB taxonomy lookup, MIBiG
-reference table download, BigSCAPE-compatible comparison preparation
-(symlinks, taxonomy, dataset registry, visualization mapping), and conversion
-of all result tables into a parquet data warehouse. Ported from the Snakemake
-pipeline NBChub/bgcflow default main path (`antismash: true`, all other
-pipelines off).
+> ★ Verified · ⇄ Official port of [`NBChub/bgcflow`](https://github.com/NBChub/bgcflow) @ `v1.1.2` — same tools, same versions, same commands. Part of the [oxo-flow-community catalog](https://oxo-flow-community.github.io/).
+
+This workflow takes a set of your own bacterial genomes and takes them
+end-to-end through biosynthetic gene cluster (BGC) discovery: prokka
+annotation of every genome, antiSMASH 7 secondary-metabolite mining with
+automated database setup, per-genome BGC counts and overview tables, GTDB
+taxonomy lookup for each genome, download of the MIBiG reference table,
+BigSCAPE-compatible comparison preparation (region symlinks, taxonomy table,
+dataset registry, visualization mapping), and conversion of all result tables
+into a parquet data warehouse — ready for downstream comparison, exploration,
+and reporting.
+
+## Installation
+
+### 1. Install oxo-flow
+
+Requires **oxo-flow >= 0.11.0**. The release binary (recommended):
+
+```bash
+curl -fL -o oxo-flow.tar.gz \
+  https://github.com/Traitome/oxo-flow/releases/download/v0.11.0/oxo-flow-v0.11.0-x86_64-unknown-linux-gnu.tar.gz
+tar xzf oxo-flow.tar.gz && sudo mv oxo-flow /usr/local/bin/
+```
+
+Alternatively, conda users may `conda install -c bioconda oxo-flow-cli` — note
+it may lag behind releases; binaries for other platforms are on the
+[releases page](https://github.com/Traitome/oxo-flow/releases).
+
+### 2. Get this workflow
+
+```bash
+git clone https://github.com/oxo-flow-community/oxo-flow-bgcflow.git
+cd oxo-flow-bgcflow
+```
+
+### 3. Requirements
+
+**Reference data you must provide:**
+
+- One genome FASTA per genome, `{config.raw_dir}/fasta/<genome_id>.fna`
+  (`raw_dir` defaults to `test/fixtures/raw`; `.fna`/`.fasta`/`.fa` are all
+  accepted) — see `config/samples.csv` for the sample table format (columns
+  `genome_id,source,organism,genus,species,strain`).
+- Optional: GTDB offline taxonomy TSVs (space-separated list via
+  `config.gtdb_tax_paths`) if you want to skip the GTDB API/table download.
+
+**Downloads on first run** (network access required): the antiSMASH databases
+into `resources/antismash_db` (several GB), the GTDB
+`bac120_metadata_r220.tsv` fallback table, and the MIBiG JSON 3.1 collection
+into `resources/mibig/`.
+
+**Compute:** up to 4 CPUs per rule (`prokka`, `antismash`); no explicit
+memory limits in the workflow — antiSMASH is by far the heaviest step. Allow
+several GB of disk for the downloaded resources plus the `data/` output tree.
+
+**Tool delivery:** conda environments with pinned versions, declared in
+`main.oxoflow` (`envs/antismash.yaml`, `envs/prokka.yaml`,
+`envs/bgc_analytics.yaml`) — antiSMASH 7.1.0, prokka 1.14.6 and the pinned
+Python analytics stack (python 3.9.18, pandas 2.0.3, pyarrow 14.0.2,
+biopython 1.81, requests 2.31.0, alive_progress 3.1.5). Requires conda/mamba.
+
+## Usage
+
+```bash
+# 1. install oxo-flow (see Installation)
+# 2. prepare data: test/fixtures/raw/fasta/<genome_id>.fna + a sample table
+#    (see config/samples.csv; columns genome_id,source,organism,genus,species,strain)
+# 3. preview the plan
+oxo-flow dry-run main.oxoflow
+# 4. run
+oxo-flow run main.oxoflow -j 8
+# 5. run a subset
+oxo-flow run main.oxoflow -t antismash --samples first:1
+```
+
+Configuration lives in the `[config]` section of `main.oxoflow`: point
+`raw_dir` and `samples_csv` at your data, and tune `antismash_db_path`
+(default `resources/antismash_db`), `antismash_taxon` (default `bacteria`),
+and the GTDB release settings (`gtdb_release`, `gtdb_offline`). antiSMASH
+requires network access on first run to download its databases.
 
 ## Source
 
-Ported from **[NBChub/bgcflow](https://github.com/NBChub/bgcflow)**, version
-`v1.1.2` (MIT). This port is maintained independently and **may lag the
-upstream** — check the `v1.1.2` above and the fidelity table below for the
-exact ported state.
+Upstream: **[NBChub/bgcflow](https://github.com/NBChub/bgcflow)** @ `v1.1.2`
+(sha `f668687aca98a7651eb0cb5a29e55286270c318d`), MIT license. Created
+2026-08-15; this workflow may lag behind upstream releases. Upstream
+attribution in [NOTICE.md](NOTICE.md).
 
 ## Fidelity
 
@@ -65,44 +137,19 @@ exact ported state.
 | copy_custom_genbank / copy_converted_gbk / genbank_to_fna/gff/faa / format_genbank_meta extras | not ported | python | genbank input path, off by default |
 | report rules (copy_readme, copy_template_notebook, mkdocs_*_report) | not ported | jupyter/mkdocs | separate `bgcflow build report` command, not in the main Snakefile |
 
-## Quickstart
+## Test
 
 ```bash
-# 1. install oxo-flow (see Requirements)
-# 2. prepare data: test/fixtures/raw/fasta/<genome_id>.fna + a sample table
-#    (see config/samples.csv; columns genome_id,source,organism,genus,species,strain)
-# 3. preview the plan
-oxo-flow dry-run main.oxoflow
-# 4. run
-oxo-flow run main.oxoflow -j 8
-# 5. run a subset
-oxo-flow run main.oxoflow -t antismash --samples first:1
+bash test/run.sh
 ```
 
-## Requirements
-
-- **oxo-flow ≥ 0.11.0** — install the prebuilt binary:
-
-```bash
-curl -fL -o oxo-flow.tar.gz \
-  https://github.com/Traitome/oxo-flow/releases/download/v0.11.0/oxo-flow-v0.11.0-x86_64-unknown-linux-gnu.tar.gz
-tar xzf oxo-flow.tar.gz
-sudo mv oxo-flow /usr/local/bin/
-```
-
-- Conda users may alternatively `conda install -c bioconda oxo-flow-cli`
-  (note: the bioconda package currently lags the release binary at 0.10.2 —
-  some 0.11.0 format features may not validate).
-- Conda environments declared in `main.oxoflow` (`envs/antismash.yaml`,
-  `envs/prokka.yaml`, `envs/bgc_analytics.yaml`) provide antiSMASH 7.1.0,
-  prokka 1.14.6, and the pinned Python analytics stack. antiSMASH requires
-  network access on first run to download its databases (default
-  `config.antismash_db_path = "resources/antismash_db"`).
+Runs `validate` + `lint` + a dry-run of the default config
+(`OXO=/path/to/oxo-flow bash test/run.sh`).
 
 ## License
 
-Apache-2.0. Copyright (c) 2026 oxo-flow-community. Upstream attribution in
-[NOTICE.md](NOTICE.md).
+Apache-2.0. Copyright (c) 2026 oxo-flow-community. Upstream (MIT) attribution
+in [NOTICE.md](NOTICE.md).
 
 ## Community
 

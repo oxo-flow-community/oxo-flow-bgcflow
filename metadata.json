@@ -1,7 +1,9 @@
 {
   "name": "oxo-flow-bgcflow",
-  "title": "BGCflow (port)",
-  "engine": "oxo-flow",
+  "title": "Biosynthetic gene cluster (BGC) genome mining: annotation, antiSMASH and data warehouse",
+  "origin": "port",
+  "rating": "verified",
+  "engine": "snakemake",
   "source": {
     "repo": "NBChub/bgcflow",
     "url": "https://github.com/NBChub/bgcflow",
@@ -10,9 +12,8 @@
     "license": "MIT"
   },
   "created": "2026-08-15",
-  "domain": "genomics",
+  "domain": "genome-mining",
   "tags": ["bgc", "secondary-metabolites", "antismash", "genome-mining", "prokka", "gtdb", "mibig", "snakemake"],
-  "description": "oxo-flow port of the NBChub/bgcflow pipeline (default main path): prokka annotation of user-provided genomes, antiSMASH 7 secondary-metabolite mining with automated database setup, BGC count/overview/summary aggregation, GTDB taxonomy lookup, MIBiG reference table download, BigSCAPE-compatible comparison preparation (symlinks, taxonomy, dataset registry, visualization mapping), and conversion of all result tables into a parquet data warehouse.",
   "scope": [
     "copy_custom_fasta",
     "gtdb_prep",
@@ -58,18 +59,21 @@
     "report rules (copy_readme, copy_template_notebook, mkdocs_py_report, mkdocs_rpy_report, copy_template_rnotebook) — separate 'bgcflow build report' command, not part of the main Snakefile default path"
   ],
   "rule_count": 18,
-  "tools": [
-    "prokka@1.14.6",
-    "antismash@7.1.0",
-    "python@3.9.18",
-    "pandas@2.0.3",
-    "pyarrow@14.0.2",
-    "biopython@1.81",
-    "requests@2.31.0",
-    "alive_progress@3.1.5"
-  ],
-  "status": "ready",
+  "tools": ["prokka", "antismash", "python", "pandas", "pyarrow", "biopython", "requests", "alive_progress"],
+  "description": "End-to-end biosynthetic gene cluster (BGC) analysis of user-provided bacterial genomes: prokka annotation, antiSMASH 7 secondary-metabolite mining with automated database setup, per-genome BGC counts and overview tables, GTDB taxonomy lookup, MIBiG reference table download, BigSCAPE-compatible comparison preparation (symlinks, taxonomy, dataset registry, visualization mapping), and conversion of all result tables into a parquet data warehouse — ready for downstream comparison and exploration.",
+  "installation": {
+    "engine": "oxo-flow >= 0.11.0",
+    "toolchain": "conda envs — pinned versions (declared in main.oxoflow: envs/antismash.yaml, envs/prokka.yaml, envs/bgc_analytics.yaml; a few antiSMASH helper packages use unpinned ranges)",
+    "requirements": [
+      "genome FASTA per genome at {config.raw_dir}/fasta/<genome_id>.fna (raw_dir defaults to test/fixtures/raw; .fna/.fasta/.fa accepted)",
+      "sample table config/samples.csv — columns genome_id,source,organism,genus,species,strain",
+      "network access on first run: antiSMASH databases (~several GB, into resources/antismash_db), GTDB bac120_metadata_r220.tsv fallback table, MIBiG JSON 3.1",
+      "optional: GTDB offline taxonomy TSVs via config.gtdb_tax_paths",
+      "compute: up to 4 CPUs per rule (prokka, antiSMASH); no explicit memory limits — antiSMASH dominates",
+      "disk: several GB for downloaded resources (antiSMASH DB, MIBiG) plus the data/ output tree"
+    ]
+  },
   "repo_url": "https://github.com/oxo-flow-community/oxo-flow-bgcflow",
-  "site_page": "https://oxo-flow-community.github.io/oxo-flow-bgcflow/",
+  "license": "Apache-2.0",
   "upstream_license": "MIT"
 }
