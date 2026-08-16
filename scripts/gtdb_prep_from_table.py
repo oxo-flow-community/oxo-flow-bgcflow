@@ -183,6 +183,9 @@ def create_gtdb_metadata_from_table(
     df_gtdb_metadata = pd.read_csv(gtdb_metadata_path, sep="\t", low_memory=False)
     df_gtdb_metadata = df_gtdb_metadata.set_index("accession")
 
+    # Non-GCF/GCA genome ids (e.g. custom sample names) fall through
+    # unchanged: they are simply not present in the GTDB metadata table.
+    accession = genome_id
     if genome_id.startswith("GCF_"):
         logging.debug("Detected Refseq entry")
         accession = f"RS_{genome_id}"

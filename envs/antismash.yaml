@@ -38,6 +38,4 @@ dependencies:
   - perl-yaml
   - xz
   - yaml
-  - pip
-  - pip:
-    - git+https://github.com/antismash/antismash.git@7-1-0-1
+  - bioconda::antismash=7.1.0
