@@ -2,7 +2,7 @@
   "name": "oxo-flow-bgcflow",
   "title": "Biosynthetic gene cluster (BGC) genome mining: annotation, antiSMASH and data warehouse",
   "origin": "port",
-  "rating": "verified",
+  "rating": "live-verified",
   "engine": "snakemake",
   "source": {
     "repo": "NBChub/bgcflow",
