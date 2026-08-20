@@ -2,7 +2,6 @@ name: antismash_env
 channels:
   - conda-forge
   - bioconda
-  - defaults
 dependencies:
   - meme=4.11.2
   - python>=3.9
@@ -38,6 +37,4 @@ dependencies:
   - perl-yaml
   - xz
   - yaml
-  - pip
-  - pip:
-    - git+https://github.com/antismash/antismash.git@7-1-0-1
+  - bioconda::antismash=7.1.0

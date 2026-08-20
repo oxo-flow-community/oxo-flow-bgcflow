@@ -103,7 +103,10 @@ def gtdb_prep(
                         gtdb_tax["genome_id"] = genome_id
                         gtdb_tax.update(
                             get_parent_taxon_GTDB(
-                                query.genus.values[0], "genus", release
+                                query.genus.values[0],
+                                "genus",
+                                api_base_url,
+                                release=release,
                             )
                         )
                         gtdb_tax["gtdb_taxonomy"][
@@ -119,7 +122,9 @@ def gtdb_prep(
                 )
                 gtdb_tax["genome_id"] = genome_id
                 gtdb_tax.update(
-                    get_parent_taxon_GTDB(query.genus.values[0], "genus", release)
+                    get_parent_taxon_GTDB(
+                        query.genus.values[0], "genus", api_base_url, release=release
+                    )
                 )
                 try:
                     gtdb_tax["gtdb_taxonomy"][
