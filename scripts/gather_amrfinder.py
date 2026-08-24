@@ -25,6 +25,13 @@ def cleanup_amrfinder(input_file, genome_id=None):
     if genome_id is None:
         genome_id = input_path.stem
     df = pd.read_csv(input_path, sep="\t")
+    # Version adaptation (documented): with --plus the AMRFinder table can
+    # carry duplicate column names (the plus block repeats the core
+    # columns) and the upstream-era script assumes unique names, dying with
+    # "Cannot set a DataFrame with multiple columns to the single column
+    # Protein identifier" (live). Keep the first occurrence.
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated()]
 
     # Fill null values in 'Protein identifier' with a combination of 'Contig id', 'Start', and 'Stop'
     df["Protein identifier"] = df.apply(
