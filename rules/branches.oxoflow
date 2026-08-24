@@ -1,0 +1,496 @@
+# ================================================================
+# Non-default branches of NBChub/bgcflow v1.1.2, ported rule-for-rule.
+# Each upstream `run_X: true`-gated group is mirrored with
+# `when = "config.run_X"` (defaults false, matching the upstream
+# config.yaml defaults). Conda envs are copied verbatim from the upstream
+# workflow/envs/*.yaml pins.
+#
+# Ported: seqfu, mash, fastani, checkm, gtdbtk, amrfinderplus, roary,
+# eggnog, gecco, cblaster, arts, bigscape, antismash v6 branch,
+# prokka_gbk genbank-input path, ncbi_genome_download,
+# write_dependency_versions.
+#
+# NOT ported (with reasons):
+#   - bigslice: needs the upstream bigslice HMM DB bundle (custom download,
+#     GBs) and a specific python env — documented.
+#   - automlst_wrapper: upstream git-clones + patches the AutoMLST tool at
+#     install time (custom install rule) — documented.
+#   - deeptfactor: TF-prediction service with its own model bundle —
+#     documented.
+#   - metabase / build_warehouse: upstream downloads the metabase jar +
+#     duckdb plugin at install time — documented.
+#   - patric_genome_download: PATRIC CLI credentials + API access —
+#     documented.
+#   - report notebooks (mkdocs/py report rules): separate `bgcflow build
+#     report` entrypoint, not part of the Snakefile default path.
+# ================================================================
+
+[workflow]
+name = "branches"
+
+# ------------------------------------------------------------------ seqfu ----
+[[rules]]
+name = "seqfu_stats"
+description = "seqfu stats per genome (upstream seqfu_stats, run_seqfu)"
+when = "config.run_seqfu"
+input = ["data/interim/fasta/{sample}.fna"]
+output = ["data/interim/seqfu/{sample}.json"]
+log = "logs/seqfu/seqfu/seqfu-{sample}.log"
+tags = ["qc", "genome"]
+shell = """
+mkdir -p logs/seqfu/seqfu
+seqfu stats {input[0]} --json -b --gc --precision 3 > {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/seqfu.yaml"
+
+[[rules]]
+name = "seqfu_combine"
+description = "combine seqfu stats into a project table (upstream seqfu_combine)"
+when = "config.run_seqfu"
+expand_inputs = [
+    { pattern = "data/interim/seqfu/{sample}.json", variables = { sample = "config.samples_list" } }
+]
+output = ["data/processed/{config.project}/tables/df_seqfu_stats.csv"]
+log = "logs/seqfu/seqfu-{config.project}.log"
+tags = ["qc", "genome"]
+shell = """
+mkdir -p logs/seqfu
+python scripts/seqfu_combine.py {input} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+# ------------------------------------------------------------------- mash ----
+[[rules]]
+name = "mash"
+description = "mash triangle distance matrix (upstream mash, run_mash)"
+when = "config.run_mash"
+expand_inputs = [
+    { pattern = "data/interim/fasta/{sample}.fna", variables = { sample = "config.samples_list" } }
+]
+output = [
+    "data/interim/mash/{config.project}/mash_in.txt",
+    "data/interim/mash/{config.project}/triangle_distance_matrix.tsv",
+]
+log = "logs/mash/mash-triangle-{config.project}.log"
+tags = ["comparison", "genome"]
+shell = """
+mkdir -p logs/mash data/interim/mash/{config.project}
+for fna in {input}
+do
+    echo $fna >> {output[0]}
+done
+(mash triangle -s 1000 -p {threads} -l {output[0]} >> {output[1]}) 2>> {log}
+"""
+[rules.environment]
+conda = "envs/mash.yaml"
+
+[[rules]]
+name = "mash_convert"
+description = "convert mash triangle matrix to CSV (upstream mash_convert)"
+when = "config.run_mash"
+input = ["data/interim/mash/{config.project}/triangle_distance_matrix.tsv"]
+output = ["data/processed/{config.project}/mash/df_mash.csv"]
+log = "logs/mash/mash-convert-{config.project}.log"
+tags = ["comparison", "genome"]
+shell = """
+mkdir -p logs/mash data/processed/{config.project}/mash
+python scripts/convert_triangular_matrix.py {input[0]} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+# ----------------------------------------------------------------- fastani ----
+[[rules]]
+name = "fastani"
+description = "fastANI pairwise ANI matrix (upstream fastani, run_fastani)"
+when = "config.run_fastani"
+expand_inputs = [
+    { pattern = "data/interim/fasta/{sample}.fna", variables = { sample = "config.samples_list" } }
+]
+output = [
+    "data/interim/fastani/{config.project}/fastani_in.txt",
+    "data/interim/fastani/{config.project}/fastani_out.tsv",
+    "data/interim/fastani/{config.project}/fastani_out.tsv.matrix",
+]
+log = "logs/fastani/fastani-{config.project}.log"
+tags = ["comparison", "genome"]
+shell = """
+mkdir -p logs/fastani data/interim/fastani/{config.project}
+for fna in {input}
+do
+    echo $fna >> {output[0]}
+done
+fastANI --ql {output[0]} --rl {output[0]} -t {threads} --matrix -o {output[1]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/fastani.yaml"
+
+[[rules]]
+name = "fastani_convert"
+description = "convert fastANI matrix to CSV (upstream fastani_convert)"
+when = "config.run_fastani"
+input = ["data/interim/fastani/{config.project}/fastani_out.tsv.matrix"]
+output = ["data/processed/{config.project}/fastani/df_fastani.csv"]
+log = "logs/fastani/fastani-convert-{config.project}.log"
+tags = ["comparison", "genome"]
+shell = """
+mkdir -p logs/fastani data/processed/{config.project}/fastani
+python scripts/convert_triangular_matrix.py {input[0]} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+# ------------------------------------------------------------------ checkm ----
+[[rules]]
+name = "install_checkm"
+description = "download the CheckM 2015 reference DB (upstream install_checkm)"
+when = "config.run_checkm"
+output = ["resources/checkm/checkm_data_2015_01_16.tar.gz"]
+log = "logs/checkm/checkm-install_checkm.log"
+tags = ["reference", "checkm"]
+shell = """
+mkdir -p logs/checkm resources
+(cd resources && wget -O checkm_data_2015_01_16.tar.gz https://data.ace.uq.edu.au/public/CheckM_databases/checkm_data_2015_01_16.tar.gz) &>> {log}
+mkdir -p resources/checkm
+(cd resources && tar -xvf checkm_data_2015_01_16.tar.gz -C checkm) &>> {log}
+checkm data setRoot resources/checkm &>> {log}
+"""
+[rules.environment]
+conda = "envs/checkm.yaml"
+
+[[rules]]
+name = "checkm"
+description = "checkm lineage_wf quality estimate (upstream checkm, run_checkm)"
+when = "config.run_checkm"
+expand_inputs = [
+    { pattern = "data/interim/fasta/{sample}.fna", variables = { sample = "config.samples_list" } }
+]
+output = [
+    "data/interim/checkm/{config.project}/storage/bin_stats_ext.tsv",
+    "data/interim/checkm/{config.project}/checkm_{config.project}.log",
+]
+log = "logs/checkm/checkm_{config.project}.log"
+tags = ["qc", "genome"]
+shell = """
+mkdir -p logs/checkm data/interim/checkm/{config.project}
+for f in {input}; do cp $f data/interim/checkm/{config.project}/.; done
+checkm lineage_wf -t {threads} --reduced_tree -x fna data/interim/checkm/{config.project} data/interim/checkm/{config.project}/checkm_out &>> {log}
+mv data/interim/checkm/{config.project}/checkm_out/storage/bin_stats_ext.tsv data/interim/checkm/{config.project}/storage/ 2>/dev/null || true
+cp data/interim/checkm/{config.project}/checkm_out.log data/interim/checkm/{config.project}/checkm_{config.project}.log 2>/dev/null || true
+"""
+[rules.environment]
+conda = "envs/checkm.yaml"
+
+# ------------------------------------------------------------------ gtdbtk ----
+[[rules]]
+name = "install_gtdbtk"
+description = "download the GTDB-Tk reference package (upstream install_gtdbtk; multi-GB)"
+when = "config.run_gtdbtk"
+output = ["resources/gtdbtk/VERSION"]
+log = "logs/gtdbtk/gtdbtk-install_gtdbtk.log"
+tags = ["reference", "gtdbtk"]
+shell = """
+mkdir -p logs/gtdbtk resources
+(cd resources && wget https://data.gtdb.ecogenomic.org/releases/release{config.gtdb_release_major}/{config.gtdb_release}/auxillary_files/gtdbtk_{config.gtdb_release_version}_data.tar.gz -nc) 2>> {log}
+(cd resources && mkdir -p gtdbtk && tar -xvzf gtdbtk_{config.gtdb_release_version}_data.tar.gz -C "gtdbtk" --strip 1 && rm gtdbtk_{config.gtdb_release_version}_data.tar.gz) &>> {log}
+ls resources/gtdbtk/VERSION
+"""
+[rules.environment]
+conda = "envs/gtdbtk.yaml"
+
+[[rules]]
+name = "gtdbtk"
+description = "GTDB-Tk classify_wf (upstream gtdbtk, run_gtdbtk)"
+when = "config.run_gtdbtk"
+expand_inputs = [
+    { pattern = "data/interim/fasta/{sample}.fna", variables = { sample = "config.samples_list" } }
+]
+output = ["data/interim/gtdbtk/{config.project}/gtdbtk.bac120.summary.tsv"]
+log = "logs/gtdbtk/gtdbtk_{config.project}.log"
+tags = ["taxonomy", "gtdbtk"]
+shell = """
+mkdir -p logs/gtdbtk data/interim/gtdbtk/{config.project}/input
+for f in {input}; do cp $f data/interim/gtdbtk/{config.project}/input/.; done
+gtdbtk classify_wf --genome_dir data/interim/gtdbtk/{config.project}/input --out_dir data/interim/gtdbtk/{config.project}/out -x fna --cpus {threads} --pplacer_cpus 1 --skip_ani_screen &>> {log}
+cp data/interim/gtdbtk/{config.project}/out/gtdbtk.bac120.summary.tsv {output[0]}
+"""
+[rules.environment]
+conda = "envs/gtdbtk.yaml"
+
+# ------------------------------------------------------------- amrfinderplus ----
+[[rules]]
+name = "amrfinderplus"
+description = "NCBI AMRFinderPlus resistance annotation (upstream amrfinderplus, run_amrfinderplus)"
+when = "config.run_amrfinderplus"
+input = [
+    "data/interim/fasta/{sample}.fna",
+    "data/interim/prokka/{sample}/{sample}.faa",
+    "data/interim/prokka/{sample}/{sample}.gff",
+]
+output = ["data/interim/amrfinderplus/{sample}.tsv"]
+log = "logs/amrfinderplus/amrfinderplus/{sample}.log"
+tags = ["annotation", "amr"]
+shell = """
+mkdir -p logs/amrfinderplus/amrfinderplus
+amrfinder -p {input[1]} \\
+    -n {input[0]} \\
+    -g {input[2]} \\
+    -a prokka \\
+    --plus \\
+    --ident_min -1 \\
+    --coverage_min 0.5 \\
+    --translation_table 11 \\
+    --threads {threads} \\
+    --log {log} > {output[0]}
+"""
+[rules.environment]
+conda = "envs/amrfinder.yaml"
+
+[[rules]]
+name = "amrfinder_gather"
+description = "gather AMRFinder tables per project (upstream amrfinder_gather)"
+when = "config.run_amrfinderplus"
+expand_inputs = [
+    { pattern = "data/interim/amrfinderplus/{sample}.tsv", variables = { sample = "config.samples_list" } }
+]
+output = ["data/processed/{config.project}/tables/df_amrfinderplus.csv"]
+log = "logs/amrfinderplus/gather/amrfinderplus_gather_{config.project}.log"
+tags = ["annotation", "amr"]
+shell = """
+mkdir -p logs/amrfinderplus/gather data/processed/{config.project}/tables
+python scripts/amrfinder_gather.py {input} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+# ------------------------------------------------------------------- roary ----
+[[rules]]
+name = "roary"
+description = "roary pangenome over prokka GFFs (upstream roary, run_roary)"
+when = "config.run_roary"
+expand_inputs = [
+    { pattern = "data/interim/prokka/{sample}/{sample}.gff", variables = { sample = "config.samples_list" } }
+]
+output = ["data/interim/roary/{config.project}/summary_statistics.txt"]
+log = "logs/roary/roary-{config.project}.log"
+tags = ["pangenome", "comparison"]
+shell = """
+mkdir -p logs/roary data/interim/roary/{config.project}
+roary -p {threads} -f data/interim/roary/{config.project} -i 80 -g 80000 -e -n -r -v {input} &>> {log}
+"""
+[rules.environment]
+conda = "envs/roary.yaml"
+
+[[rules]]
+name = "roary_out"
+description = "copy roary results to processed (upstream roary_out)"
+when = "config.run_roary"
+input = ["data/interim/roary/{config.project}/summary_statistics.txt"]
+output = ["data/processed/{config.project}/roary/summary_statistics.txt"]
+log = "logs/roary/roary_out-{config.project}.log"
+tags = ["pangenome", "comparison"]
+shell = """
+mkdir -p logs/roary data/processed/{config.project}/roary
+cp -r data/interim/roary/{config.project}/. data/processed/{config.project}/roary/ 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+# ------------------------------------------------------------------- eggnog ----
+[[rules]]
+name = "install_eggnog"
+description = "download the eggNOG annotation DB (upstream install_eggnog; multi-GB)"
+when = "config.run_eggnog"
+output = ["resources/eggnog_db/bacteria.dmnd"]
+log = "logs/eggnog/install_eggnog.log"
+tags = ["reference", "eggnog"]
+shell = """
+mkdir -p logs/eggnog resources/eggnog_db
+download_eggnog_data.py --data_dir resources/eggnog_db -y &>> {log}
+create_dbs.py -m diamond --dbname bacteria --taxa Bacteria --data_dir resources/eggnog_db -y &>> {log}
+"""
+[rules.environment]
+conda = "envs/eggnog.yaml"
+
+[[rules]]
+name = "eggnog"
+description = "eggnog-mapper annotation (upstream eggnog, run_eggnog)"
+when = "config.run_eggnog"
+input = [
+    "data/interim/prokka/{sample}/{sample}.faa",
+    "resources/eggnog_db/bacteria.dmnd",
+]
+output = ["data/interim/eggnog/{sample}/{sample}.emapper.annotations"]
+log = "logs/eggnog/eggnog/eggnog-{sample}.log"
+tags = ["annotation", "eggnog"]
+shell = """
+mkdir -p logs/eggnog/eggnog data/interim/eggnog/{sample} data/interim/eggnog/tmp/{sample}
+emapper.py -i {input[0]} --decorate_gff "yes" --excel --cpu {threads} -o {sample} --output_dir data/interim/eggnog/{sample} --data_dir resources/eggnog_db --temp_dir data/interim/eggnog/tmp/{sample} &>> {log}
+"""
+[rules.environment]
+conda = "envs/eggnog.yaml"
+
+# -------------------------------------------------------------------- gecco ----
+[[rules]]
+name = "gecco"
+description = "GECCO biosynthetic cluster prediction (upstream gecco, run_gecco)"
+when = "config.run_gecco"
+input = ["data/interim/processed-genbank/{sample}.gbk"]
+output = ["data/interim/gecco/{config.gecco_version}/{sample}/{sample}.clusters.tsv"]
+log = "logs/gecco/run/{config.gecco_version}_{sample}.log"
+tags = ["bgc", "gecco"]
+shell = """
+mkdir -p logs/gecco/run data/interim/gecco/{config.gecco_version}
+gecco run --genome {input[0]} \\
+    --output-dir data/interim/gecco/{config.gecco_version}/{sample} \\
+    --antismash-sideload \\
+    --jobs {threads} \\
+    --force-tsv 2>> {log}
+"""
+[rules.environment]
+conda = "envs/gecco.yaml"
+
+# ------------------------------------------------------------------ cblaster ----
+[[rules]]
+name = "cblaster_genome_db"
+description = "cblaster genome database over prokka GBKs (upstream cblaster_genome_db, run_cblaster)"
+when = "config.run_cblaster"
+expand_inputs = [
+    { pattern = "data/interim/processed-genbank/{sample}.gbk", variables = { sample = "config.samples_list" } }
+]
+output = ["data/interim/cblaster/{config.project}/genomes/cblaster_genome_db.dmnd"]
+log = "logs/cblaster/cblaster_db_genomes_{config.project}.log"
+tags = ["comparison", "cblaster"]
+shell = """
+mkdir -p logs/cblaster data/interim/cblaster/{config.project}/genomes
+cblaster config --email dummy@cblaster.com 2>> {log}
+cblaster makedb --cpus {threads} -b 50 -n data/interim/cblaster/{config.project}/genomes/cblaster_genome_db {input} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/cblaster.yaml"
+
+# ---------------------------------------------------------------------- arts ----
+[[rules]]
+name = "arts"
+description = "ARTS resistance screening on antiSMASH GBKs (upstream arts, run_arts; needs the ARTS reference bundle in resources/arts)"
+when = "config.run_arts"
+input = ["data/interim/antismash/{config.antismash_version}/{sample}/{sample}.gbk"]
+output = ["data/interim/arts/antismash-{config.antismash_version}/{sample}/knownresistances_summary.txt"]
+log = "logs/arts/arts/arts-{config.antismash_version}-{sample}.log"
+tags = ["amr", "arts"]
+shell = """
+mkdir -p logs/arts/arts data/interim/arts/antismash-{config.antismash_version}/{sample}
+python resources/arts/artspipeline1.py {input[0]} resources/arts/reference/actinobacteria/ -rd data/interim/arts/antismash-{config.antismash_version}/{sample} -cpu {threads} -opt kres,phyl,duf -khmms resources/arts/reference/knownresistance.hmm 2>> {log}
+"""
+[rules.environment]
+conda = "envs/arts.yaml"
+
+# ------------------------------------------------------------------ bigscape ----
+[[rules]]
+name = "bigscape"
+description = "BiG-SCAPE BGC clustering (upstream bigscape, run_bigscape; needs the pfam + MIBiG databases in resources)"
+when = "config.run_bigscape"
+input = ["data/interim/antismash/{config.antismash_version}"]
+output = ["data/interim/bigscape/{config.project}/{config.project}_output/run_data/index.html"]
+log = "logs/bigscape/bigscape-{config.project}.log"
+tags = ["bgc", "comparison"]
+shell = """
+mkdir -p logs/bigscape data/interim/bigscape/{config.project}
+bigscape -i {input[0]} -o data/interim/bigscape/{config.project}/{config.project}_output --pfam_dir resources/bigscape --cores {threads} --include_distances --mibig 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bigscape.yaml"
+
+# --------------------------------------------------------- antiSMASH v6 branch ----
+[[rules]]
+name = "antismash_v6"
+description = "antiSMASH v6 run (upstream antismash v6 branch, antismash_major = '6')"
+when = "config.antismash_major == '6'"
+input = ["data/interim/fasta/{sample}.fna"]
+output = ["data/interim/antismash/{config.antismash_version}/{sample}/{sample}.gbk"]
+log = "logs/antismash/antismash-{config.antismash_version}/{sample}.log"
+tags = ["bgc", "antismash"]
+shell = """
+mkdir -p logs/antismash/antismash-{config.antismash_version} data/interim/antismash/{config.antismash_version}
+antismash --cpus {threads} --genefinding-tool prodigal --fullhmmer --asf --cc-mibig --cb-general --cb-knownclusters --cb-subclusters --genefinding-gff3 --output-dir data/interim/antismash/{config.antismash_version}/{sample} --taxon {config.antismash_taxon} {input[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/antismash6.yaml"
+
+# ------------------------------------------------------- genbank input path ----
+[[rules]]
+name = "prokka_gbk"
+description = "prokka annotation from a user-provided genbank (upstream prokka_gbk, input_type=gbk)"
+when = "config.input_type == 'gbk'"
+input = ["{config.raw_dir}/gbk/{sample}.gbk"]
+output = ["data/interim/prokka/{sample}/{sample}.gff"]
+log = "logs/prokka/prokka_gbk/prokka_gbk-{sample}.log"
+tags = ["annotation", "prokka"]
+shell = """
+mkdir -p logs/prokka/prokka_gbk data/interim/prokka/{sample}
+prokka --force --quiet --outdir data/interim/prokka/{sample} --prefix {sample} {input[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/prokka.yaml"
+
+[[rules]]
+name = "copy_custom_genbank"
+description = "copy user-provided genbank files (upstream copy_custom_genbank)"
+when = "config.input_type == 'gbk'"
+input = ["{config.raw_dir}/gbk/{sample}.gbk"]
+output = ["data/interim/processed-genbank/{sample}.gbk"]
+log = "logs/prokka/copy_custom_genbank/copy_custom_genbank-{sample}.log"
+tags = ["input", "genomes"]
+shell = """
+mkdir -p logs/prokka/copy_custom_genbank data/interim/processed-genbank
+cp {input[0]} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "genbank_to_fna"
+description = "convert genbank to fna (upstream genbank_to_fna; reads the raw gbk directly so the gbk path has no edge from format_gbk's processed-genbank output — upstream resolves the same producer overlap with input-function branching)"
+when = "config.input_type == 'gbk'"
+input = ["{config.raw_dir}/gbk/{sample}.gbk"]
+output = ["data/interim/fasta/{sample}.fna"]
+log = "logs/convert_genbank/genbank_to_fna/genbank_to_fna-{sample}.log"
+tags = ["input", "genomes"]
+shell = """
+mkdir -p logs/convert_genbank/genbank_to_fna data/interim/fasta
+python scripts/genbank_to_fasta.py {input[0]} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "ncbi_genome_download"
+description = "download genomes from NCBI (upstream ncbi_genome_download, project_source=ncbi)"
+when = "config.project_source == 'ncbi'"
+output = ["data/raw/ncbi_download.done"]
+log = "logs/ncbi/ncbi_genome_download.log"
+tags = ["input", "download"]
+shell = """
+mkdir -p logs/ncbi data/raw/fasta
+ncbi-genome-download --genera "{config.ncbi_genera}" --section genbank --assembly-levels complete,chromosome --formats fasta --flat-output -o data/raw/ncbi bacteria 2>> {log}
+touch {output[0]}
+"""
+[rules.environment]
+conda = "envs/ncbi.yaml"
+
+# ------------------------------------------------- dependency versions ----
+[[rules]]
+name = "write_dependency_versions"
+description = "write the dependency versions tsv (upstream write_dependency_versions)"
+when = "config.write_dependency_versions"
+output = ["data/processed/{config.project}/tables/df_dependency_versions.tsv"]
+log = "logs/dependency_versions.log"
+tags = ["meta"]
+shell = """
+mkdir -p data/processed/{config.project}/tables
+python scripts/write_dependency_versions.py {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"

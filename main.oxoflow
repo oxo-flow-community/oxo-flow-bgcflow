@@ -40,9 +40,34 @@ bgcflow_version = "1.1.2"              # upstream __version__ (format_genbank_me
 mibig_version = "3.1"                  # MIBiG JSON release used by get_mibig_table
 bgc_dataset = "data/interim/bgcs/datasets.tsv"
 
+# --- non-default branches (upstream rule_parameters, all false by default) ---
+# see rules/branches.oxoflow; samples_list is the engine-injected sample ids
+samples_list = ["S1", "S2"]
+run_seqfu = false
+run_mash = false
+run_fastani = false
+run_checkm = false
+run_gtdbtk = false
+run_amrfinderplus = false
+run_roary = false
+run_eggnog = false
+run_gecco = false
+gecco_version = "0.9.10"
+run_cblaster = false
+run_arts = false
+run_bigscape = false
+project_source = "custom"
+ncbi_genera = ""
+write_dependency_versions = false
+
 [[sample_groups]]
 name = "genomes"
 samples = ["S1", "S2"]
+
+# Non-default upstream branches (gated off by default, mirroring the
+# upstream config.yaml rule_parameters): see rules/branches.oxoflow.
+[[include]]
+path = "rules/branches.oxoflow"
 
 # ---------------------------------------------------------------------------
 # 1. Genome input + prokka annotation chain
@@ -53,6 +78,7 @@ samples = ["S1", "S2"]
 [[rules]]
 name = "copy_custom_fasta"
 description = "Copy user-provided genome FASTA files into the interim fasta directory"
+when = "config.input_type == 'fna'"
 input = ["{config.raw_dir}/fasta/{sample}.fna"]
 output = ["data/interim/fasta/{sample}.fna"]
 log = "logs/prokka/copy_custom_fasta/copy_custom_fasta-{sample}.log"
@@ -115,6 +141,7 @@ conda = "envs/bgc_analytics.yaml"
 [[rules]]
 name = "prokka"
 description = "Annotate the genome with prokka (upstream annotation step feeding antiSMASH)"
+when = "config.input_type == 'fna'"
 input = ["data/interim/fasta/{sample}.fna", "data/interim/prokka/{sample}/organism_info.txt"]
 output = [
     "data/interim/prokka/{sample}/{sample}.gff",
@@ -143,6 +170,7 @@ conda = "envs/prokka.yaml"
 [[rules]]
 name = "format_gbk"
 description = "Add BGCflow metadata comments to the prokka genbank file (upstream format_gbk)"
+when = "config.input_type == 'fna'"
 input = ["data/interim/prokka/{sample}/{sample}.gbk", "data/interim/gtdb/{sample}.json"]
 output = ["data/interim/processed-genbank/{sample}.gbk"]
 log = "logs/prokka/format_gbk/format_gbk-{sample}.log"

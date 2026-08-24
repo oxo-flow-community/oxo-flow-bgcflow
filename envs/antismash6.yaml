@@ -1,0 +1,44 @@
+name: antismash_6
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - meme==4.11.2
+  - python>=3.9
+  - hmmer2
+  - hmmer
+  - diamond==2.0.15
+  - fasttree
+  - prodigal
+  - blast
+  - muscle=3.8
+  - glimmerhmm
+  - expat
+  - ghostscript
+  - icu
+  - libexpat
+  - libgcc-ng
+  - libxml2
+  - libxslt
+  - libzlib
+  - openjdk
+  - perl
+  - perl-cgi
+  - perl-file-which
+  - perl-html-parser
+  - perl-html-template
+  - perl-html-tree
+  - perl-json
+  - perl-log-log4perl
+  - perl-math-cdf
+  - perl-module-build
+  - perl-sys-info
+  - perl-xml-parser
+  - perl-xml-simple
+  - perl-yaml
+  - xz
+  - yaml
+  - pip
+  - pip:
+    - git+https://github.com/antismash/antismash.git@6-1-1
