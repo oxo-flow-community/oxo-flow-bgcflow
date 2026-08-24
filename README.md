@@ -146,6 +146,21 @@ bash test/run.sh
 Runs `validate` + `lint` + a dry-run of the default config
 (`OXO=/path/to/oxo-flow bash test/run.sh`).
 
+## Live verification (bioinfo-wsx, oxo-flow 0.14.1, conda envs)
+
+| Stage | Scope | Status |
+|---|---|---|
+| default path | S1/S2 mini fixtures: gtdb_prep, prokka, antismash v7 (+db setup), format_gbk, overview/summary, mibig table | ✅ |
+| branches tier 1 | run_seqfu + run_mash + run_fastani + run_roary | ✅ (roary mini fallback — see below) |
+| branches tier 2 | run_checkm (+DB install) + run_amrfinderplus (+DB install, gather) | ✅ |
+
+Mini-fixture fallbacks (documented): roary writes a header-only
+`summary_statistics.txt` plus a provenance note when the tiny synthetic
+genomes yield no pangenome signal; real-data runs take the verbatim path.
+Resource-gated, not live-run here: gtdbtk (r220 database ~100GB), eggnog
+(20GB+), gecco/cblaster/arts/bigscape (large DBs or upstream result-layout
+dependencies).
+
 ## License
 
 Apache-2.0. Copyright (c) 2026 oxo-flow-community. Upstream (MIT) attribution
