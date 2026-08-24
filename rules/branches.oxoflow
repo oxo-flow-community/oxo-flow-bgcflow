@@ -221,6 +221,25 @@ cp data/interim/gtdbtk/{config.project}/out/gtdbtk.bac120.summary.tsv {output[0]
 conda = "envs/gtdbtk.yaml"
 
 # ------------------------------------------------------------- amrfinderplus ----
+# Upstream installs the AMRFinder database via its env post-deploy
+# (envs/amrfinderplus.post-deploy.sh = amrfinder -u). oxo-flow conda envs
+# have no post-deploy hook, so the port ships it as an explicit rule with
+# a repo-local marker; amrfinderplus consumes the marker as its edge.
+[[rules]]
+name = "install_amrfinder"
+description = "Download the AMRFinder database into the env (upstream amrfinderplus.post-deploy.sh: amrfinder -u)"
+when = "config.run_amrfinderplus"
+output = ["resources/amrfinder_db_installed.marker"]
+log = "logs/amrfinderplus/amrfinderplus/install.log"
+tags = ["reference", "amr"]
+shell = """
+mkdir -p logs/amrfinderplus/amrfinderplus
+amrfinder -u &>> {log}
+touch {output[0]}
+"""
+[rules.environment]
+conda = "envs/amrfinder.yaml"
+
 [[rules]]
 name = "amrfinderplus"
 description = "NCBI AMRFinderPlus resistance annotation (upstream amrfinderplus, run_amrfinderplus)"
@@ -229,6 +248,7 @@ input = [
     "data/interim/fasta/{sample}.fna",
     "data/interim/prokka/{sample}/{sample}.faa",
     "data/interim/prokka/{sample}/{sample}.gff",
+    "resources/amrfinder_db_installed.marker",
 ]
 output = ["data/interim/amrfinderplus/{sample}.tsv"]
 log = "logs/amrfinderplus/amrfinderplus/{sample}.log"
