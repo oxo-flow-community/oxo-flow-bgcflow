@@ -281,7 +281,12 @@ log = "logs/amrfinderplus/gather/amrfinderplus_gather_{config.project}.log"
 tags = ["annotation", "amr"]
 shell = """
 mkdir -p logs/amrfinderplus/gather data/processed/{config.project}/tables
-python scripts/gather_amrfinder.py {input} {output[0]} 2>> {log}
+TMPDIR="data/interim/tmp/{config.project}"
+mkdir -p "$TMPDIR"
+INPUT_TSV="$TMPDIR/df_amrfinderplus.txt"
+echo '{input}' > "$INPUT_TSV"
+python scripts/gather_amrfinder.py "$INPUT_TSV" {output[0]} 2>> {log}
+rm "$INPUT_TSV"
 """
 [rules.environment]
 conda = "envs/bgc_analytics.yaml"
