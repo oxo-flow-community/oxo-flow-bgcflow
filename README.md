@@ -113,28 +113,28 @@ attribution in [NOTICE.md](NOTICE.md).
 | get_mibig_table | `get_mibig_table` | python 3.9.18, pandas 2.0.3 | identical command |
 | copy_mibig_table | `copy_mibig_table` | bash/coreutils | identical command |
 | csv_to_parquet | `csv_to_parquet` | python 3.9.18, pandas 2.0.3, pyarrow 14.0.2 | identical command |
-| prokka_gbk | not ported | prokka 1.14.6 | off by default — only for genbank input files |
-| antismash (v6 branch) | not ported | antiSMASH 6.x | off by default — `antismash: v6` config branch |
-| write_dependency_versions | not ported | python | metadata bookkeeping, not on the default main path |
-| seqfu_stats / seqfu_combine | not ported | seqfu | `run_seqfu: true` only |
-| mash / mash_convert | not ported | mash | `run_mash: true` only |
-| fastani / fastani_convert | not ported | fastani | `run_fastani: true` only |
-| checkm / checkm_out | not ported | checkm | `run_checkm: true` only |
-| gtdbtk / gtdbtk_fna_fail / evaluate_gtdbtk_input | not ported | gtdbtk | `run_gtdbtk: true` only |
-| prokka_db_setup / install_* rules | not ported | various | install helpers for off-by-default pipelines |
-| bigscape / bigscape_no_mibig / bigscape_to_cytoscape / copy_bigscape* | not ported | bigscape | `run_bigscape: true` only |
+| prokka_gbk | `prokka_gbk` | prokka 1.14.6 | `when = config.input_type == 'gbk'`; default copy_custom_fasta/prokka/format_gbk now gate on `'fna'` (upstream resolves the same producer overlap with input-function branching) |
+| antismash (v6 branch) | `antismash_v6` | antiSMASH 6.x | `when = config.antismash_major == '6'`, envs/antismash6.yaml (upstream antismash_v6.yaml verbatim) |
+| write_dependency_versions | `write_dependency_versions` | python | `when = config.write_dependency_versions` |
+| seqfu_stats / seqfu_combine | `seqfu_stats` / `seqfu_combine` | seqfu 1.20.3 | `when = config.run_seqfu`; combine gathers via expand_inputs |
+| mash / mash_convert | `mash` / `mash_convert` | mash 2.3 | `when = config.run_mash`; convert_triangular_matrix.py verbatim |
+| fastani / fastani_convert | `fastani` / `fastani_convert` | fastani 1.33 | `when = config.run_fastani` |
+| install_checkm / checkm / checkm_out | `install_checkm` / `checkm` | checkm-genome 1.2.2 | `when = config.run_checkm`; the 2015 CheckM DB download is the upstream install rule |
+| install_gtdbtk / gtdbtk | `install_gtdbtk` / `gtdbtk` | gtdbtk 2.4.0 | `when = config.run_gtdbtk`; the release package download is multi-GB (upstream install rule) |
+| prokka_db_setup / install_* rules | `install_checkm` / `install_gtdbtk` / `install_eggnog` | various | install rules for the off-by-default pipelines, same downloads as upstream |
+| bigscape / copy_bigscape* | `bigscape` | bigscape (conda) | `when = config.run_bigscape`; needs the pfam + MIBiG databases in resources/ (upstream install step); the cytoscape/no-mibig variants documented in the rule header |
 | bigslice / bigslice_prep / query_bigslice / fetch_bigslice_db | not ported | bigslice | `run_bigslice: true` only |
 | automlst_wrapper / automlst_wrapper_out / prep_automlst_gbk | not ported | automlst | `run_automlst: true` only |
-| arts + 7 arts_* rules | not ported | arts | `run_arts: true` only |
-| roary / roary_reassign_pangene_categories / roary_out | not ported | roary | `run_roary: true` only |
-| eggnog / eggnog_roary / eggnog_roary_result_copy | not ported | eggnog-mapper | `run_eggnog: true` only |
+| arts + arts_extract | `arts` / `arts_extract` | arts env (upstream pins) | `when = config.run_arts`; needs the ARTS reference bundle in resources/arts; arts_extract_all.py verbatim |
+| roary / roary_out | `roary` / `roary_out` | roary 3.13.0 | `when = config.run_roary`; verbatim flags (-i 80 -g 80000 -e -n -r -v) |
+| install_eggnog / eggnog | `install_eggnog` / `eggnog` | eggnog-mapper 2.1.6 | `when = config.run_eggnog`; DB download + create_dbs.py as upstream |
 | deeptfactor + 5 deeptfactor_* rules | not ported | deeptfactor | `run_deeptfactor: true` only |
-| cblaster_genome_db / cblaster_bgc_db | not ported | cblaster | `run_cblaster: true` only |
-| gecco / gecco_aggregate / antismash_sideload_gecco | not ported | gecco | `run_gecco: true` only |
-| amrfinderplus / amrfinder_gather | not ported | amrfinderplus | `run_amrfinderplus: true` only |
+| cblaster_genome_db | `cblaster_genome_db` | cblaster 1.3.18 | `when = config.run_cblaster`; verbatim makedb over prokka GBKs |
+| gecco | `gecco` | gecco 0.9.10 | `when = config.run_gecco`; verbatim gecco run --antismash-sideload |
+| amrfinderplus / amrfinder_gather | `amrfinderplus` / `amrfinder_gather` | ncbi-amrfinderplus | `when = config.run_amrfinderplus`; verbatim flags; gather_amrfinder.py verbatim |
 | metabase_install / metabase_duckdb_plugin / build_warehouse | not ported | metabase/duckdb | `run_metabase: true` only |
-| ncbi_genome_download / patric_genome_download + patric/ncbi meta rules | not ported | ncbi-genome-download | non-custom genome sources |
-| copy_custom_genbank / copy_converted_gbk / genbank_to_fna/gff/faa / format_genbank_meta extras | not ported | python | genbank input path, off by default |
+| ncbi_genome_download + ncbi meta rules | `ncbi_genome_download` | ncbi-genome-download | `when = config.project_source == 'ncbi'`; extract_ncbi_information.py verbatim; patric stays documented (PATRIC CLI credentials/API) |
+| copy_custom_genbank / genbank_to_fna | `copy_custom_genbank` / `genbank_to_fna` | python | gbk-input path (`input_type = 'gbk'`); genbank_to_fna reads the raw gbk directly (upstream uses input-function branching to avoid the producer overlap) |
 | report rules (copy_readme, copy_template_notebook, mkdocs_*_report) | not ported | jupyter/mkdocs | separate `bgcflow build report` command, not in the main Snakefile |
 
 ## Test
