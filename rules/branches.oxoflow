@@ -6,21 +6,17 @@
 # workflow/envs/*.yaml pins.
 #
 # Ported: seqfu, mash, fastani, checkm, gtdbtk, amrfinderplus, roary,
-# eggnog, gecco, cblaster, arts, bigscape, antismash v6 branch,
-# prokka_gbk genbank-input path, ncbi_genome_download,
+# eggnog, gecco, cblaster, arts, bigscape, bigslice, automlst, deeptfactor,
+# antismash v6 branch, prokka_gbk genbank-input path, ncbi_genome_download,
 # write_dependency_versions.
 #
 # NOT ported (with reasons):
-#   - bigslice: needs the upstream bigslice HMM DB bundle (custom download,
-#     GBs) and a specific python env — documented.
-#   - automlst_wrapper: upstream git-clones + patches the AutoMLST tool at
-#     install time (custom install rule) — documented.
-#   - deeptfactor: TF-prediction service with its own model bundle —
-#     documented.
-#   - metabase / build_warehouse: upstream downloads the metabase jar +
-#     duckdb plugin at install time — documented.
-#   - patric_genome_download: PATRIC CLI credentials + API access —
-#     documented.
+#   - metabase / build_warehouse: separate `bgcflow build warehouse`
+#     entrypoint (wrapper CLI), not included in the main Snakefile — no
+#     pipeline gate to mirror; needs a live Metabase server + credentials.
+#   - patric_genome_download + patric meta rules: download from
+#     ftp://ftp.patricbrc.org — PATRIC decommissioned (2023, merged into
+#     BV-BRC); verified dead endpoint (550/connection refused, 2026-08).
 #   - report notebooks (mkdocs/py report rules): separate `bgcflow build
 #     report` entrypoint, not part of the Snakefile default path.
 # ================================================================
@@ -532,6 +528,294 @@ tags = ["meta"]
 shell = """
 mkdir -p data/processed/{config.project}/tables
 python scripts/write_dependency_versions.py {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+# ------------------------------------------------------------------ bigslice ----
+# Upstream: rules/bigslice.smk, gated by pipelines.bigslice /
+# pipelines.query-bigslice (both FALSE by default). The bigslice binary is
+# pip-installed from the NBChub fork inside envs/bigslice.yaml (the original
+# medema-group/bigslice is discontinued). Upstream downloads the models via
+# an env post-deploy hook; the port ships it as an explicit install rule
+# with a repo-local marker (engine has no post-deploy), consumed as the
+# bigslice rule's input edge — same pattern as install_amrfinder.
+[[rules]]
+name = "install_bigslice"
+description = "download the BiG-SLiCE models into the env (upstream bigslice.post-deploy.sh: ~490MB tarball into $CONDA_PREFIX/bin/bigslice-models)"
+when = "config.run_bigslice"
+output = ["resources/bigslice_models.marker"]
+log = "logs/bigslice/install_bigslice.log"
+tags = ["reference", "bigslice"]
+shell = """
+mkdir -p logs/bigslice resources
+wget -O resources/bigslice_models.tar.gz https://github.com/medema-group/bigslice/releases/download/v1.0.0/bigslice-models.2020-04-27.tar.gz 2>> {log}
+mkdir -p $CONDA_PREFIX/bin/bigslice-models 2>> {log}
+tar -xvf resources/bigslice_models.tar.gz -C $CONDA_PREFIX/bin/bigslice-models 2>> {log}
+rm resources/bigslice_models.tar.gz 2>> {log}
+bigslice --version >> {log}
+touch {output[0]}
+"""
+[rules.environment]
+conda = "envs/bigslice.yaml"
+
+[[rules]]
+name = "bigslice_prep"
+description = "stage the project BGC folder for BiG-SLiCE (upstream bigslice_prep; symlink + taxonomy + datasets registry)"
+when = "config.run_bigslice"
+input = [
+    "data/interim/bgcs/{config.project}/{config.antismash_version}",
+    "data/interim/bgcs/taxonomy/taxonomy_{config.project}_antismash_{config.antismash_version}.tsv",
+]
+output = ["data/interim/bigslice/tmp/{config.project}_antismash_{config.antismash_version}"]
+log = "logs/bigslice/bigslice_prep/bigslice_{config.project}-antismash-{config.antismash_version}.log"
+tags = ["bgc", "bigslice"]
+shell = """
+mkdir -p logs/bigslice/bigslice_prep
+python scripts/bigslice_prep_single_project.py {input[0]} {input[1]} {config.project}_antismash_{config.antismash_version} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "bigslice"
+description = "cluster the project BGCs with BiG-SLiCE (upstream bigslice; needs the models from install_bigslice)"
+when = "config.run_bigslice"
+input = [
+    "data/interim/bigslice/tmp/{config.project}_antismash_{config.antismash_version}",
+    "resources/bigslice_models.marker",
+]
+output = ["data/processed/{config.project}/bigslice/cluster_as_{config.antismash_version}"]
+log = "logs/bigslice/bigslice/bigslice_{config.project}-antismash-{config.antismash_version}.log"
+tags = ["bgc", "bigslice"]
+shell = """
+mkdir -p logs/bigslice/bigslice
+bigslice -i {input[0]} {output[0]} --threshold 0.4 -t {threads} &>> {log}
+"""
+[rules.environment]
+conda = "envs/bigslice.yaml"
+
+[[rules]]
+name = "fetch_bigslice_db"
+description = "download the BiG-FAM full-run-result bundle for bigslice queries (upstream fetch_bigslice_db; ~18GB zip from bioinformatics.nl — the large custom download, verified alive 2026-08)"
+when = "config.run_query_bigslice"
+output = ["resources/bigslice/full_run_result"]
+log = "logs/bigslice/fetch_bigslice_db.log"
+tags = ["reference", "bigslice"]
+shell = """
+mkdir -p logs/bigslice resources/bigslice
+(cd resources/bigslice && wget -c -nc http://bioinformatics.nl/~kauts001/ltr/bigslice/paper_data/data/full_run_result.zip && unzip full_run_result.zip) &>> {log}
+rm resources/bigslice/full_run_result.zip &>> {log}
+"""
+[rules.environment]
+conda = "envs/bigslice.yaml"
+
+[[rules]]
+name = "query_bigslice"
+description = "query the BiG-FAM database with the project BGCs (upstream query_bigslice; needs fetch_bigslice_db)"
+when = "config.run_query_bigslice"
+input = [
+    "data/interim/bgcs/{config.project}/{config.antismash_version}",
+    "resources/bigslice/full_run_result",
+]
+output = ["data/interim/bigslice/query/{config.project}_antismash_{config.antismash_version}"]
+log = "logs/bigslice/query_bigslice/query_bigslice_{config.project}-antismash-{config.antismash_version}.log"
+tags = ["bgc", "bigslice"]
+shell = """
+mkdir -p logs/bigslice/query_bigslice
+TIMESTAMP=$(date --iso-8601=hours)
+bigslice --query {input[0]} --n_ranks 10 {input[1]} -t {threads} --query_name {config.project}_$TIMESTAMP --run_id 6 --threshold 300 --no_normalize_feature &>> {log}
+python scripts/get_bigslice_query_result.py {config.project} {output[0]} {input[1]} &>> {log}
+"""
+[rules.environment]
+conda = "envs/bigslice.yaml"
+
+[[rules]]
+name = "summarize_bigslice_query"
+description = "summarize the BiG-FAM query hits (upstream summarize_bigslice_query; GCF network + summary tables)"
+when = "config.run_query_bigslice"
+input = ["data/interim/bigslice/query/{config.project}_antismash_{config.antismash_version}"]
+output = [
+    "data/processed/{config.project}/bigslice/query_as_{config.antismash_version}/gcf_summary.csv",
+    "data/processed/{config.project}/bigslice/query_as_{config.antismash_version}/gcf_summary.json",
+    "data/processed/{config.project}/bigslice/query_as_{config.antismash_version}/query_network.csv",
+]
+log = "logs/bigslice/summarize_bigslice_query/summarize_bigslice_query_{config.project}-antismash-{config.antismash_version}.log"
+tags = ["bgc", "bigslice"]
+shell = """
+mkdir -p logs/bigslice/summarize_bigslice_query
+python scripts/summarize_bigslice_query.py {input[0]} data/processed/{config.project}/bigslice/query_as_{config.antismash_version}/ resources/bigslice/full_run_result/result/data.db 900 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "annotate_bigfam_hits"
+description = "annotate BiG-FAM GCF hits with chemical classes (upstream annotate_bigfam_hits)"
+when = "config.run_query_bigslice"
+input = ["data/processed/{config.project}/bigslice/query_as_{config.antismash_version}/gcf_summary.csv"]
+output = ["data/processed/{config.project}/bigslice/query_as_{config.antismash_version}/gcf_annotation.csv"]
+log = "logs/bigslice/summarize_bigslice_query/annotate_bigslice_query_{config.project}-antismash-{config.antismash_version}.log"
+tags = ["bgc", "bigslice"]
+shell = """
+mkdir -p logs/bigslice/summarize_bigslice_query
+python scripts/annotate_bigfam_model.py {input[0]} resources/bigslice/full_run_result/result/data.db {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+# ------------------------------------------------------------------ automlst ----
+# Upstream: rules/automlst_wrapper.smk, gated by pipelines.automlst-wrapper
+# (FALSE by default). The tool is downloaded as a release zip
+# (NBChub/automlst-simplified-wrapper v0.1.2, contains reducedcore.hmm) —
+# a download install, same pattern as install_checkm/install_gtdbtk. The
+# wrapper env is upstream's python 2.7 pin (envs/automlst_wrapper.yaml
+# verbatim; only built when the branch is enabled).
+[[rules]]
+name = "install_automlst_wrapper"
+description = "download the AutoMLST simplified wrapper release zip (upstream install_automlst_wrapper; NBChub/automlst-simplified-wrapper v0.1.2)"
+when = "config.run_automlst"
+output = ["resources/automlst-simplified-wrapper-main/reducedcore.hmm"]
+log = "logs/automlst_wrapper/install_automlst_wrapper.log"
+tags = ["reference", "automlst"]
+shell = """
+set -e
+mkdir -p logs/automlst_wrapper resources resources/automlst-simplified-wrapper-main 2>> {log}
+wget https://github.com/NBChub/automlst-simplified-wrapper/archive/refs/tags/v0.1.2.zip -O resources/automlst-simplified-wrapper-v0.1.2.zip 2>> {log}
+(cd resources && unzip -o automlst-simplified-wrapper-v0.1.2.zip && rm automlst-simplified-wrapper-v0.1.2.zip) &>> {log}
+(cd resources/automlst-simplified-wrapper-0.1.2 && unzip -o reducedcore.zip) &>> {log}
+cp -r resources/automlst-simplified-wrapper-0.1.2/* resources/automlst-simplified-wrapper-main/. 2>> {log}
+rm -rf resources/automlst-simplified-wrapper-0.1.2 2>> {log}
+ls {output[0]}
+"""
+[rules.environment]
+conda = "envs/automlst_wrapper.yaml"
+
+[[rules]]
+name = "prep_automlst_gbk"
+description = "set the organism field to the genome id for AutoMLST (upstream prep_automlst_gbk)"
+when = "config.run_automlst"
+input = ["data/interim/processed-genbank/{sample}.gbk"]
+output = ["data/interim/automlst_wrapper/{config.project}/{sample}.gbk"]
+log = "logs/automlst_wrapper/prep_automlst_gbk/prep_automlst_gbk-{config.project}_{sample}.log"
+tags = ["phylogeny", "automlst"]
+shell = """
+mkdir -p logs/automlst_wrapper/prep_automlst_gbk data/interim/automlst_wrapper/{config.project}
+python scripts/prep_automlst.py {input[0]} {output[0]} {sample} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/automlst_wrapper.yaml"
+
+[[rules]]
+name = "automlst_wrapper"
+description = "build the AutoMLST multi-locus tree over the project genomes (upstream automlst_wrapper; runs the downloaded simplified_wrapper.py)"
+when = "config.run_automlst"
+input = ["resources/automlst-simplified-wrapper-main/reducedcore.hmm"]
+expand_inputs = [
+    { pattern = "data/interim/automlst_wrapper/{config.project}/{sample}.gbk", variables = { sample = "config.samples_list" } }
+]
+output = ["data/interim/automlst_wrapper/{config.project}/raxmlpart.txt.treefile"]
+log = "logs/automlst_wrapper/automlst_wrapper/automlst_wrapper-{config.project}.log"
+tags = ["phylogeny", "automlst"]
+shell = """
+mkdir -p logs/automlst_wrapper/automlst_wrapper "data/interim/automlst_wrapper/{config.project}/singles" 2>> {log}
+python resources/automlst-simplified-wrapper-main/simplified_wrapper.py data/interim/automlst_wrapper/{config.project} {threads} &>> {log}
+"""
+[rules.environment]
+conda = "envs/automlst_wrapper.yaml"
+
+[[rules]]
+name = "automlst_wrapper_out"
+description = "copy the AutoMLST tree + MLST tables into processed and build the genome-tree table (upstream automlst_wrapper_out)"
+when = "config.run_automlst"
+input = ["data/interim/automlst_wrapper/{config.project}/raxmlpart.txt.treefile"]
+expand_inputs = [
+    { pattern = "data/interim/prokka/{sample}/organism_info.txt", variables = { sample = "config.samples_list" } },
+    { pattern = "data/interim/gtdb/{sample}.json", variables = { sample = "config.samples_list" } },
+]
+output = ["data/processed/{config.project}/automlst_wrapper/final.newick"]
+log = "logs/automlst_wrapper/automlst_wrapper/automlst_wrapper_out-{config.project}.log"
+tags = ["phylogeny", "automlst"]
+shell = """
+mkdir -p logs/automlst_wrapper/automlst_wrapper data/processed/{config.project}/automlst_wrapper
+python scripts/make_phylo_tree.py data/interim/automlst_wrapper/{config.project} data/processed/{config.project}/automlst_wrapper data/interim/prokka data/interim/gtdb 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+# ---------------------------------------------------------------- deeptfactor ----
+# Upstream: rules/deeptfactor.smk, gated by pipelines.deeptfactor (FALSE by
+# default). install is a git clone of the DeepTFactor repo
+# (bitbucket.org/kaistsystemsbiology/deeptfactor, ~23MB incl. the trained
+# TF model bundle — verified public + cloneable 2026-08, unpinned master as
+# upstream does). The env is upstream's python 3.6 + pytorch 1.10.2 pin
+# (envs/deeptfactor.yaml verbatim; only built when the branch is enabled).
+[[rules]]
+name = "deeptfactor_setup"
+description = "clone the DeepTFactor tool + model bundle (upstream deeptfactor_setup; bitbucket.org/kaistsystemsbiology/deeptfactor)"
+when = "config.run_deeptfactor"
+output = ["resources/deeptfactor/tf_running.py"]
+log = "logs/deeptfactor/deeptfactor_setup.log"
+tags = ["reference", "deeptfactor"]
+shell = """
+mkdir -p logs/deeptfactor
+git clone https://bitbucket.org/kaistsystemsbiology/deeptfactor.git resources/deeptfactor 2>> {log}
+"""
+[rules.environment]
+conda = "envs/deeptfactor.yaml"
+
+[[rules]]
+name = "deeptfactor"
+description = "predict transcription factors per genome with DeepTFactor (upstream deeptfactor; CPU mode)"
+when = "config.run_deeptfactor"
+input = [
+    "data/interim/prokka/{sample}/{sample}.faa",
+    "resources/deeptfactor/tf_running.py",
+]
+output = ["data/interim/deeptfactor/{sample}/prediction_result.txt"]
+log = "logs/deeptfactor/deeptfactor/deeptfactor-{sample}.log"
+tags = ["annotation", "deeptfactor"]
+shell = """
+workdir=$PWD
+mkdir -p logs/deeptfactor/deeptfactor data/interim/deeptfactor/{sample} 2>> {log}
+(cd resources/deeptfactor && python tf_running.py -i $workdir/{input[0]} -o $workdir/data/interim/deeptfactor/{sample}/ -g cpu -cpu {threads}) 2>> {log}
+"""
+[rules.environment]
+conda = "envs/deeptfactor.yaml"
+
+[[rules]]
+name = "deeptfactor_to_json"
+description = "convert DeepTFactor predictions to JSON (upstream deeptfactor_to_json)"
+when = "config.run_deeptfactor"
+input = ["data/interim/deeptfactor/{sample}/prediction_result.txt"]
+output = ["data/interim/deeptfactor/{sample}_deeptfactor.json"]
+log = "logs/deeptfactor/deeptfactor/deeptfactor-{sample}_to_json.log"
+tags = ["annotation", "deeptfactor"]
+shell = """
+mkdir -p logs/deeptfactor/deeptfactor
+python scripts/deeptfactor_scatter.py {input[0]} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "deeptfactor_summary"
+description = "gather DeepTFactor predictions into the project table (upstream deeptfactor_summary)"
+when = "config.run_deeptfactor"
+expand_inputs = [
+    { pattern = "data/interim/deeptfactor/{sample}_deeptfactor.json", variables = { sample = "config.samples_list" } }
+]
+output = ["data/processed/{config.project}/tables/df_deeptfactor.csv"]
+log = "logs/deeptfactor/deeptfactor_{config.project}.log"
+tags = ["annotation", "deeptfactor"]
+shell = """
+mkdir -p logs/deeptfactor data/processed/{config.project}/tables
+TMPDIR="data/interim/tmp/{config.project}"
+mkdir -p "$TMPDIR"
+INPUT_JSON="$TMPDIR/df_deeptfactor.txt"
+echo '{input}' > "$INPUT_JSON"
+python scripts/deeptfactor_gather.py "$INPUT_JSON" {output[0]} 2>> {log}
+rm "$INPUT_JSON"
 """
 [rules.environment]
 conda = "envs/bgc_analytics.yaml"

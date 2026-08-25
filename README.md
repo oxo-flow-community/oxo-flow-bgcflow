@@ -123,17 +123,19 @@ attribution in [NOTICE.md](NOTICE.md).
 | install_gtdbtk / gtdbtk | `install_gtdbtk` / `gtdbtk` | gtdbtk 2.4.0 | `when = config.run_gtdbtk`; the release package download is multi-GB (upstream install rule) |
 | prokka_db_setup / install_* rules | `install_checkm` / `install_gtdbtk` / `install_eggnog` | various | install rules for the off-by-default pipelines, same downloads as upstream |
 | bigscape / copy_bigscape* | `bigscape` | bigscape (conda) | `when = config.run_bigscape`; needs the pfam + MIBiG databases in resources/ (upstream install step); the cytoscape/no-mibig variants documented in the rule header |
-| bigslice / bigslice_prep / query_bigslice / fetch_bigslice_db | not ported | bigslice | `run_bigslice: true` only |
-| automlst_wrapper / automlst_wrapper_out / prep_automlst_gbk | not ported | automlst | `run_automlst: true` only |
+| bigslice / bigslice_prep | `bigslice` / `bigslice_prep` | bigslice (NBChub fork) | `when = config.run_bigslice`; models downloaded by install_bigslice (upstream env post-deploy equivalent); env pip-installs the NBChub fork @c0085de (original medema-group/bigslice discontinued) |
+| fetch_bigslice_db / query_bigslice / summarize_bigslice_query / annotate_bigfam_hits | `fetch_bigslice_db` / `query_bigslice` / `summarize_bigslice_query` / `annotate_bigfam_hits` | bigslice + python | `when = config.run_query_bigslice`; fetch_bigslice_db downloads the BiG-FAM full-run-result bundle (~18GB, bioinformatics.nl — verified alive 2026-08) |
+| automlst_wrapper / automlst_wrapper_out / prep_automlst_gbk / install_automlst_wrapper | `automlst_wrapper` / `automlst_wrapper_out` / `prep_automlst_gbk` / `install_automlst_wrapper` | automlst-simplified-wrapper 0.1.2 (python 2.7 env) | `when = config.run_automlst`; install downloads the release zip (not a git clone); scripts verbatim |
 | arts + arts_extract | `arts` / `arts_extract` | arts env (upstream pins) | `when = config.run_arts`; needs the ARTS reference bundle in resources/arts; arts_extract_all.py verbatim |
 | roary / roary_out | `roary` / `roary_out` | roary 3.13.0 | `when = config.run_roary`; verbatim flags (-i 80 -g 80000 -e -n -r -v) |
 | install_eggnog / eggnog | `install_eggnog` / `eggnog` | eggnog-mapper 2.1.6 | `when = config.run_eggnog`; DB download + create_dbs.py as upstream |
-| deeptfactor + 5 deeptfactor_* rules | not ported | deeptfactor | `run_deeptfactor: true` only |
+| deeptfactor + 4 deeptfactor_* rules | `deeptfactor` / `deeptfactor_setup` / `deeptfactor_to_json` / `deeptfactor_summary` | deeptfactor (bitbucket, ~23MB) | `when = config.run_deeptfactor`; setup git-clones the unpinned bitbucket repo (model bundle included — verified public 2026-08); env is upstream's python 3.6 + pytorch 1.10.2 pin |
 | cblaster_genome_db | `cblaster_genome_db` | cblaster 1.3.18 | `when = config.run_cblaster`; verbatim makedb over prokka GBKs |
 | gecco | `gecco` | gecco 0.9.10 | `when = config.run_gecco`; verbatim gecco run --antismash-sideload |
 | amrfinderplus / amrfinder_gather | `amrfinderplus` / `amrfinder_gather` | ncbi-amrfinderplus | `when = config.run_amrfinderplus`; verbatim flags; gather_amrfinder.py verbatim |
-| metabase_install / metabase_duckdb_plugin / build_warehouse | not ported | metabase/duckdb | `run_metabase: true` only |
-| ncbi_genome_download + ncbi meta rules | `ncbi_genome_download` | ncbi-genome-download | `when = config.project_source == 'ncbi'`; extract_ncbi_information.py verbatim; patric stays documented (PATRIC CLI credentials/API) |
+| metabase_install / metabase_duckdb_plugin / build_warehouse | not ported | metabase/duckdb | separate `bgcflow build warehouse` entrypoint (wrapper CLI), not included in the main Snakefile — no pipeline gate to mirror; needs a live Metabase server + credentials |
+| ncbi_genome_download + ncbi meta rules | `ncbi_genome_download` | ncbi-genome-download | `when = config.project_source == 'ncbi'`; extract_ncbi_information.py verbatim |
+| patric_genome_download + patric meta rules | not ported | patric | per-sample source=patric; download endpoint ftp.patricbrc.org is dead (PATRIC decommissioned 2023, merged into BV-BRC; verified 550/connection-refused 2026-08) |
 | copy_custom_genbank / genbank_to_fna | `copy_custom_genbank` / `genbank_to_fna` | python | gbk-input path (`input_type = 'gbk'`); genbank_to_fna reads the raw gbk directly (upstream uses input-function branching to avoid the producer overlap) |
 | report rules (copy_readme, copy_template_notebook, mkdocs_*_report) | not ported | jupyter/mkdocs | separate `bgcflow build report` command, not in the main Snakefile |
 
@@ -159,7 +161,8 @@ Mini-fixture fallbacks (documented): roary writes a header-only
 genomes yield no pangenome signal; real-data runs take the verbatim path.
 Resource-gated, not live-run here: gtdbtk (r220 database ~100GB), eggnog
 (20GB+), gecco/cblaster/arts/bigscape (large DBs or upstream result-layout
-dependencies).
+dependencies), bigslice (models ~490MB + BiG-FAM bundle ~18GB),
+automlst (python 2.7 tool download), deeptfactor (git-cloned model bundle).
 
 ## License
 
