@@ -35,7 +35,7 @@
     "csv_to_parquet"
   ],
   "excluded": [
-    "metabase_install / metabase_duckdb_plugin / build_warehouse — separate 'bgcflow build warehouse' entrypoint (wrapper CLI), not included in the main Snakefile — no pipeline gate to mirror; needs a live Metabase server + credentials (the jar/plugin URLs themselves are alive, but the rules are unreachable from the default Snakefile path)",
+    "metabase_install / metabase_duckdb_plugin / build_warehouse — metabase.smk + build-database.smk are not included in the main Snakefile and are only reachable outside the pipeline (wrapper CLI / manual); no pipeline gate to mirror; the warehouse branch additionally needs a live Metabase server + credentials (the jar/plugin URLs themselves are alive, but the rules are unreachable from the default Snakefile path)",
     "patric_genome_download / download_patric_tables / extract_patric_meta — download endpoint ftp.patricbrc.org is dead: PATRIC was decommissioned in 2023 (merged into BV-BRC); verified 550 / connection refused 2026-08",
     "report rules (copy_readme, copy_template_notebook, mkdocs_py_report, mkdocs_rpy_report, copy_template_rnotebook) — separate 'bgcflow build report' entrypoint (wrapper CLI), not part of the main Snakefile default path"
   ],

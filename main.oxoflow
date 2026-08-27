@@ -25,7 +25,7 @@ samples_csv = "config/samples.csv"     # sample table (upstream: config/<project
 input_type = "fna"                     # upstream get_input_location(): fna | gbk
 # antiSMASH (upstream rule_parameters.antismash + envs/antismash.yaml)
 antismash_major = "7"                  # 6 or 7 (selects the v6/v7 rule branches)
-antismash_version = "7.1.0"            # derived from envs/antismash.yaml pip pin git@7-1-0-1
+antismash_version = "7.1.0"            # matches envs/antismash.yaml bioconda::antismash=7.1.0
 antismash_db_path = "resources/antismash_db"   # upstream resources_path.antismash_db
 antismash_taxon = "bacteria"           # upstream env var BGCFLOW_ANTISMASH_MODE
 # GTDB taxonomy (upstream rule_parameters.install_gtdbtk + use_gtdb_api)

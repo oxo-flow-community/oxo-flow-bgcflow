@@ -423,7 +423,11 @@ conda = "envs/arts.yaml"
 # ------------------------------------------------------------------ bigscape ----
 [[rules]]
 name = "bigscape"
-description = "BiG-SCAPE BGC clustering (upstream bigscape, run_bigscape; needs the pfam + MIBiG databases in resources)"
+# Unported upstream variants (bigscape.smk, all report-view artifacts):
+# install_bigscape (the pfam/MIBiG download — the port documents it as a
+# resources/ requirement instead), bigscape_no_mibig, copy_bigscape_zip,
+# bigscape_to_cytoscape, copy_bigscape.
+description = "BiG-SCAPE BGC clustering (upstream bigscape, run_bigscape; needs the pfam + MIBiG databases in resources; the no-mibig/cytoscape/copy variants are not ported — see header)"
 when = "config.run_bigscape"
 input = ["data/interim/antismash/{config.antismash_version}"]
 output = ["data/interim/bigscape/{config.project}/{config.project}_output/run_data/index.html"]
@@ -516,18 +520,20 @@ conda = "envs/ncbi.yaml"
 # ------------------------------------------------- dependency versions ----
 [[rules]]
 name = "write_dependency_versions"
-# The upstream script this rule invokes does not exist in NBChub/bgcflow
-# @ f668687 (tree enumeration), so the rule is gated off by default and
-# documented rather than silently stubbed. Port it once upstream ships
-# the script.
-description = "write the dependency versions tsv (upstream write_dependency_versions; upstream's script is missing from the repo — gated off)"
+# Upstream (bgc_analytics.smk) runs get_dependencies.py over the
+# project_metadata.json produced by the peppy-based get_project_metadata rule
+# — neither of those is on the upstream default path (the report module
+# consumes them). The port ships a faithful local port of get_dependencies.py
+# (scripts/write_dependency_versions.py, env paths adapted to the repo-root
+# envs/ layout) and keeps the rule gated off by default, matching upstream.
+description = "write the workflow dependency versions json (upstream write_dependency_versions; get_dependencies.py ported — gated off, not on the upstream default path)"
 when = "config.write_dependency_versions"
-output = ["data/processed/{config.project}/tables/df_dependency_versions.tsv"]
+output = ["data/processed/{config.project}/metadata/dependency_versions.json"]
 log = "logs/dependency_versions.log"
 tags = ["meta"]
 shell = """
-mkdir -p data/processed/{config.project}/tables
-python scripts/write_dependency_versions.py {output[0]} 2>> {log}
+mkdir -p data/processed/{config.project}/metadata
+python scripts/write_dependency_versions.py {output[0]} {config.antismash_major} 2>> {log}
 """
 [rules.environment]
 conda = "envs/bgc_analytics.yaml"
