@@ -139,6 +139,11 @@ attribution in [NOTICE.md](NOTICE.md).
 | copy_custom_genbank / genbank_to_fna + genbank_to_faa / extract_meta_genbank / genbank_to_gff / copy_converted_gbk / summarize_converted_gbk | `copy_custom_genbank` / `genbank_to_fna` | python | gbk-input path (`input_type = 'gbk'`); genbank_to_fna reads the raw gbk directly (upstream uses input-function branching to avoid the producer overlap); the faa/gff/meta/summary extras not ported |
 | report rules (copy_readme, copy_template_notebook, mkdocs_*_report) | not ported | jupyter/mkdocs | separate `bgcflow build report` command, not in the main Snakefile |
 
+Known deviations: the upstream `mlst`, `refseq_masher`, and `diamond` modules
+are unreachable in upstream's own default DAG (no pipeline gate or consumer
+wires them in) and are therefore not ported; `diamond` survives only inside
+the eggnog DB build (`create_dbs.py -m diamond`).
+
 ## Test
 
 ```bash

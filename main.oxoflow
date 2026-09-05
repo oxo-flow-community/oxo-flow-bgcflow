@@ -224,6 +224,7 @@ conda = "envs/antismash.yaml"
 [[rules]]
 name = "antismash"
 description = "Run antiSMASH v7 on the annotated genome (region detection with reuse-result retry)"
+when = "config.antismash_major != '6'"
 input = ["data/interim/processed-genbank/{sample}.gbk"]
 output = [
     "data/interim/antismash/{config.antismash_version}/{sample}/{sample}.gbk",
@@ -397,11 +398,11 @@ python scripts/bigslice_prep.py data/processed/{config.project}/tables/df_gtdb_m
 if [[ -s {config.bgc_dataset} ]]
 then
     echo "Previous dataset detected, appending dataset information for {config.project}..." >> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
-    sed -i 'a {config.project}_antismash_{config.antismash_version}\\t{config.project}_antismash_{config.antismash_version}\\ttaxonomy/taxonomy_{config.project}_antismash_{config.antismash_version}.tsv\\t{config.project}' {config.bgc_dataset} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+    printf '%s_antismash_%s\\t%s_antismash_%s\\ttaxonomy/taxonomy_%s_antismash_%s.tsv\\t%s\\n' "{config.project}" "{config.antismash_version}" "{config.project}" "{config.antismash_version}" "{config.project}" "{config.antismash_version}" "{config.project}" >> {config.bgc_dataset} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
 else
     echo "No previous dataset detected, generating dataset information for {config.project}..." >> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
     echo -e '# Dataset name\\tPath to folder\\tPath to taxonomy\\tDescription' > {config.bgc_dataset} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
-    sed -i 'a {config.project}_antismash_{config.antismash_version}\\t{config.project}_antismash_{config.antismash_version}\\ttaxonomy/taxonomy_{config.project}_antismash_{config.antismash_version}.tsv\\t{config.project}' {config.bgc_dataset} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
+    printf '%s_antismash_%s\\t%s_antismash_%s\\ttaxonomy/taxonomy_%s_antismash_%s.tsv\\t%s\\n' "{config.project}" "{config.antismash_version}" "{config.project}" "{config.antismash_version}" "{config.project}" "{config.antismash_version}" "{config.project}" >> {config.bgc_dataset} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
 fi
 echo "Step 3. Generate mapping for visualization" >> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
 python scripts/get_bigscape_mapping.py {output[2]} {output[3]} 2>> logs/bgcs/downstream_bgc_prep/{config.project}/downstream_bgc_prep-{config.antismash_version}.log
