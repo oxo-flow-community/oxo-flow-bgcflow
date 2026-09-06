@@ -148,6 +148,20 @@ are unreachable in upstream's own default DAG (no pipeline gate or consumer
 wires them in) and are therefore not ported; `diamond` survives only inside
 the eggnog DB build (`create_dbs.py -m diamond`).
 
+## Not ported (per-rule, upstream v1.1.2)
+
+- **PPanGGOLiN (workflow/ppanggolin)**: `ppanggolin_BGC`, `ppanggolin_bgc_prep`, `ppanggolin_genome`, `ppanggolin_genome_borders`, `ppanggolin_genome_draw_spots`, `ppanggolin_genome_draw_tile_plot`, `ppanggolin_genome_draw_tile_plot_nocloud`, `ppanggolin_genome_draw_ucurve`, `ppanggolin_genome_families`, `ppanggolin_genome_gene_pres_abs`, `ppanggolin_genome_gexf`, `ppanggolin_genome_modules`, `ppanggolin_genome_partitions`, `ppanggolin_genome_projection`, `ppanggolin_genome_roary`, `ppanggolin_genome_roary_borders`, `ppanggolin_genome_roary_draw_spots`, `ppanggolin_genome_roary_draw_tile_plot`, `ppanggolin_genome_roary_draw_tile_plot_nocloud`, `ppanggolin_genome_roary_draw_ucurve`, `ppanggolin_genome_roary_families`, `ppanggolin_genome_roary_gene_pres_abs`, `ppanggolin_genome_roary_gexf`, `ppanggolin_genome_roary_modules`, `ppanggolin_genome_roary_partitions`, `ppanggolin_genome_roary_projection`, `ppanggolin_genome_roary_spot_modules`, `ppanggolin_genome_roary_write_regions`, `ppanggolin_genome_roary_write_spots`, `ppanggolin_genome_roary_write_stats`, `ppanggolin_genome_spot_modules`, `ppanggolin_genome_write_regions`, `ppanggolin_genome_write_spots`, `ppanggolin_genome_write_stats`
+
+- **LsABGC (workflow/lsabgc)**: `install_lsabgc_db`, `lsabgc_autoanalyze`, `lsabgc_prepare`, `lsabgc_prepare_tax`, `lsabgc_ready`
+
+- **Alleleome (workflow/Alleleome)**: `alleleome`, `prepare_alleleome`, `prepare_alleleome_fasta`
+
+- **BGC comparison (workflow/BGC)**: `antismash_colourmap`, `clinker`, `clinker_extract`, `clinker_gene_functions`, `downstream_bgc_prep_selection`, `getphylo`, `getphylo_prep`, `install_interproscan`, `interproscan`, `minimap2`, `mmseq_all`, `mmseqs2`, `mmseqs2_annotate_cog`, `mmseqs2_easy_cluster`, `mmseqs2_extract`, `mmseqs2_extract_cog`, `prep_clinker`, `prep_gbk_mmseqs2`, `prepare_aa_interproscan`, `prepare_aa_mmseqs2`
+
+- **Database (workflow/Database)**: `antismash_db_duckdb`, `antismash_json_extract`, `build_cdss_table`, `build_database`, `build_dna_sequences_table`, `build_regions_table`, `build_warehouse`, `get_dbt_template`
+
+- **main Snakefile gaps (create_diamond_db, mlst, refseq_masher, get_project_metadata)**: `create_diamond_db`, `get_project_metadata`, `mlst`, `refseq_masher`
+
 ## Test
 
 ```bash
