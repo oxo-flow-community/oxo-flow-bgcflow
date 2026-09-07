@@ -7,8 +7,8 @@
 #
 # Ported: seqfu, mash, fastani, checkm, gtdbtk, amrfinderplus, roary,
 # eggnog, gecco, cblaster, arts, bigscape, bigslice, automlst, deeptfactor,
-# antismash v6 branch, prokka_gbk genbank-input path, ncbi_genome_download,
-# write_dependency_versions.
+# lsabgc, antismash v6 branch, prokka_gbk genbank-input path,
+# ncbi_genome_download, write_dependency_versions.
 #
 # NOT ported (with reasons):
 #   - metabase / build_warehouse: separate `bgcflow build warehouse`
@@ -427,7 +427,7 @@ name = "bigscape"
 # install_bigscape (the pfam/MIBiG download — the port documents it as a
 # resources/ requirement instead), bigscape_no_mibig, copy_bigscape_zip,
 # bigscape_to_cytoscape, copy_bigscape.
-description = "BiG-SCAPE BGC clustering (upstream bigscape, run_bigscape; needs the pfam + MIBiG databases in resources; the no-mibig/cytoscape/copy variants are not ported — see header)"
+description = "BiG-SCAPE BGC clustering (upstream bigscape, run_bigscape; needs the pfam + MIBiG databases in resources; the no-mibig/cytoscape/copy variants are not ported — see header; consumed by lsabgc_ready when run_lsabgc is set)"
 when = "config.run_bigscape"
 input = ["data/interim/antismash/{config.antismash_version}"]
 output = ["data/interim/bigscape/{config.project}/{config.project}_output/run_data/index.html"]
@@ -825,3 +825,111 @@ rm "$INPUT_JSON"
 """
 [rules.environment]
 conda = "envs/bgc_analytics.yaml"
+
+# -------------------------------------------------------------------- lsabgc ----
+# Upstream: rules/lsabgc.smk + standalone workflow/lsabgc entrypoint, gated by
+# pipelines.lsabgc (FALSE by default). The env (envs/lsabgc.yaml) is upstream's
+# verbatim pin set; upstream's post-deploy script installs the lsaBGC v1.52
+# Python package into the env — the engine has no post-deploy hook, so that
+# install folded into install_lsabgc_db (install_bigslice pattern). One port
+# divergence: lsabgc_ready consumes bigscape output via THIS port's bigscape
+# rule layout (data/interim/bigscape/<project>/<project>_output/run_data/),
+# not upstream's flat bigscape dir.
+[[rules]]
+name = "install_lsabgc_db"
+description = "install lsaBGC v1.52 + download the lsaBGC database (upstream install_lsabgc_db + env post-deploy)"
+when = "config.run_lsabgc"
+output = ["resources/lsaBGC-database"]
+log = "logs/lsabgc/install-db.log"
+tags = ["reference", "lsabgc"]
+shell = """
+mkdir -p logs/lsabgc resources 2>> {log}
+cd resources
+if [ ! -d lsaBGC ]; then
+  wget -q https://github.com/Kalan-Lab/lsaBGC/archive/refs/tags/v1.52.tar.gz 2>> ../{log}
+  tar -xzf v1.52.tar.gz
+  mv lsaBGC-1.52 lsaBGC
+  rm v1.52.tar.gz
+fi
+pip install -e lsaBGC 2>> ../{log}
+cd ..
+mkdir -p resources/lsaBGC-database
+setup_annotation_dbs.py -p resources/lsaBGC-database --no_ko 2>> {log}
+"""
+[rules.environment]
+conda = "envs/lsabgc.yaml"
+
+[[rules]]
+name = "lsabgc_prepare"
+description = "build lsaBGC genome/BGC-genbank listings from the antismash mapping (upstream lsabgc_prepare run-block)"
+when = "config.run_lsabgc"
+input = ["data/interim/bgcs/{config.project}/{config.project}_antismash_{config.antismash_version}.csv"]
+expand_inputs = [
+    { pattern = "data/interim/fasta/{sample}.fna", variables = { sample = "config.samples_list" } }
+]
+output = [
+    "data/interim/lsabgc/{config.project}/as_{config.antismash_version}/Primary_Genomes_Listing.txt",
+    "data/interim/lsabgc/{config.project}/as_{config.antismash_version}/Primary_Genome_BGC_Genbanks_Listing.txt",
+]
+log = "logs/lsabgc/lsabgc_prepare-{config.project}-as_{config.antismash_version}.log"
+tags = ["annotation", "lsabgc"]
+shell = """
+mkdir -p logs/lsabgc 2>> {log}
+python scripts/lsabgc_prepare.py {input[0]} {config.antismash_version} {output[1]} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/lsabgc.yaml"
+
+[[rules]]
+name = "lsabgc_ready"
+description = "run lsaBGC-Ready: annotate BGCs, cluster with bigscape results, GToTree (upstream lsabgc_ready)"
+when = "config.run_lsabgc"
+input = [
+    "resources/lsaBGC-database",
+    "data/interim/lsabgc/{config.project}/as_{config.antismash_version}/Primary_Genomes_Listing.txt",
+    "data/interim/lsabgc/{config.project}/as_{config.antismash_version}/Primary_Genome_BGC_Genbanks_Listing.txt",
+    "data/interim/bigscape/{config.project}/{config.project}_output/run_data/index.html",
+]
+output = ["data/processed/{config.project}/lsabgc/as_{config.antismash_version}/lsaBGC_Ready_Results"]
+log = "logs/lsabgc/lsabgc_ready-{config.project}-as_{config.antismash_version}.log"
+tags = ["annotation", "lsabgc"]
+shell = """
+mkdir -p logs/lsabgc 2>> {log}
+bigscape_dir=$(dirname {input[3]})
+lsaBGC-Ready.py --genome_listing {input[1]} --bgc_genbank_listing {input[2]} --bgc_prediction_software antiSMASH --bigscape_results $bigscape_dir --cpus {threads} --run_gtotree --lsabgc_cluster --lsabgc_expansion --output_directory {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/lsabgc.yaml"
+
+[[rules]]
+name = "lsabgc_prepare_tax"
+description = "reduce the GTDB table to the genome_id -> species mapping (upstream lsabgc_prepare_tax run-block)"
+when = "config.run_lsabgc"
+input = ["data/processed/{config.project}/tables/df_gtdb_meta.csv"]
+output = ["data/interim/lsabgc/{config.project}/as_{config.antismash_version}/Genome_to_Species_Mapping.txt"]
+log = "logs/lsabgc/lsabgc_prepare_tax-{config.project}-as_{config.antismash_version}.log"
+tags = ["annotation", "lsabgc"]
+shell = """
+mkdir -p logs/lsabgc 2>> {log}
+python scripts/lsabgc_prepare_tax.py {input[0]} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/lsabgc.yaml"
+
+[[rules]]
+name = "lsabgc_autoanalyze"
+description = "run lsaBGC-AutoAnalyze over the ready results (upstream lsabgc_autoanalyze)"
+when = "config.run_lsabgc"
+input = [
+    "data/interim/lsabgc/{config.project}/as_{config.antismash_version}/Genome_to_Species_Mapping.txt",
+    "data/processed/{config.project}/lsabgc/as_{config.antismash_version}/lsaBGC_Ready_Results",
+]
+output = ["data/processed/{config.project}/lsabgc/as_{config.antismash_version}/lsaBGC_AutoAnalyze_Results"]
+log = "logs/lsabgc/lsabgc_autoanalyze-{config.project}-as_{config.antismash_version}.log"
+tags = ["annotation", "lsabgc"]
+shell = """
+mkdir -p logs/lsabgc 2>> {log}
+lsaBGC-AutoAnalyze.py -i {input[1]}/Final_Results/Primary_Sample_Annotation_Files.txt -g {input[1]}/Final_Results/GCF_Listings/ -m {input[1]}/Final_Results/Orthogroups.tsv -s {input[1]}/Final_Results/GToTree_output.tre -w {input[1]}/Final_Results/GToTree_Expected_Similarities.txt -u {input[0]} -c {threads} -o {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/lsabgc.yaml"
