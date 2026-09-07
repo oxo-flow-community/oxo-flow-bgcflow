@@ -62,6 +62,7 @@ run_automlst = false                # upstream pipelines.automlst-wrapper
 run_deeptfactor = false             # upstream pipelines.deeptfactor
 run_lsabgc = false                  # upstream pipelines.lsabgc (standalone workflow/lsabgc entrypoint)
 run_alleleome = false               # upstream pipelines.alleleome (needs run_roary)
+run_ppanggolin = false              # upstream pipelines.ppanggolin (needs run_roary for the genome_roary chain)
 project_source = "custom"
 ncbi_genera = ""
 write_dependency_versions = false

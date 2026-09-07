@@ -132,6 +132,7 @@ attribution in [NOTICE.md](NOTICE.md).
 | deeptfactor / deeptfactor_setup / deeptfactor_to_json / deeptfactor_summary | `deeptfactor` / `deeptfactor_setup` / `deeptfactor_to_json` / `deeptfactor_summary` | deeptfactor (bitbucket, ~23MB) | `when = config.run_deeptfactor`; setup git-clones the unpinned bitbucket repo (model bundle included — verified public 2026-08); env is upstream's python 3.6 + pytorch 1.10.2 pin |
 | install_lsabgc_db / lsabgc_prepare / lsabgc_ready / lsabgc_prepare_tax / lsabgc_autoanalyze | same names | lsaBGC 1.52 (env) | `when = config.run_lsabgc`; standalone workflow/lsabgc entrypoint; lsaBGC software installed by install_lsabgc_db (upstream env post-deploy equivalent); lsabgc_ready consumes the port's bigscape output path (upstream layout differs); prepare run-blocks extracted to scripts/lsabgc_prepare{,_tax}.py |
 | prepare_alleleome / prepare_alleleome_fasta / alleleome | same names | Core-Alleleome 0.1.0 (env pip) | `when = config.run_alleleome`; needs run_roary (upstream chains alleleome off the pangenome); env is upstream's verbatim pin set (Core-Alleleome v0.1.0 pip-installed from GitHub in-env); scripts copied verbatim |
+| ppanggolin_bgc_prep + ppanggolin_BGC / ppanggolin_genome + 15 write/draw rules / ppanggolin_genome_roary + 15 write/draw rules | same names | PPanGGOLiN 1.2.105 | `when = config.run_ppanggolin`; both chains ported one-to-one (workflow/ppanggolin entrypoint incl. ppanggolin_roary.smk); genome_roary seeds clustering from roary (--clusters + --infer_singletons); ppanggolin_bgc_prep run-block extracted to scripts/ppanggolin_bgc_prep.py; env verbatim (ppanggolin 1.2.105, no post-deploy) |
 | cblaster_genome_db / cblaster_bgc_db | `cblaster_genome_db` | cblaster 1.3.18 | `when = config.run_cblaster`; verbatim makedb over prokka GBKs; cblaster_bgc_db (MIBiG-BGC database build) not ported |
 | gecco / antismash_sideload_gecco / gecco_aggregate | `gecco` | gecco 0.9.10 | `when = config.run_gecco`; verbatim gecco run --antismash-sideload; antismash_sideload_gecco + gecco_aggregate (report tables) not ported |
 | amrfinderplus / amrfinder_gather | `amrfinderplus` / `amrfinder_gather` | ncbi-amrfinderplus | `when = config.run_amrfinderplus`; verbatim flags; gather_amrfinder.py verbatim |
@@ -166,7 +167,8 @@ Resource-gated, not live-run here: gtdbtk (r220 database ~100GB), eggnog
 dependencies), bigslice (models ~490MB + BiG-FAM bundle ~18GB),
 automlst (python 2.7 tool download), deeptfactor (git-cloned model bundle),
 lsabgc (lsaBGC-database download + lsaBGC v1.52 install), alleleome
-(Core-Alleleome pip install; needs roary).
+(Core-Alleleome pip install; needs roary), ppanggolin (env build +
+pangenome compute; needs roary for the genome_roary chain).
 
 ## License
 

@@ -39,4 +39,14 @@ done
 trap - EXIT
 rm -f .tmp.oxoflow
 
+echo "==> branch-flip: run_ppanggolin=true shows the ppanggolin rules"
+sed -e 's/^run_ppanggolin = false/run_ppanggolin = true/' main.oxoflow > .tmp.oxoflow
+trap 'rm -f .tmp.oxoflow /tmp/oxo-dryrun-ppanggolin-*.txt' EXIT
+"$OXO" dry-run .tmp.oxoflow --samples first:1 > /tmp/oxo-dryrun-ppanggolin-$$.txt 2>&1
+for r in ppanggolin_bgc_prep ppanggolin_BGC ppanggolin_genome ppanggolin_genome_spot_modules ppanggolin_genome_roary ppanggolin_genome_roary_spot_modules; do
+    grep -qE "^  [0-9]+\. ${r}  \[run" /tmp/oxo-dryrun-ppanggolin-$$.txt || { echo "ppanggolin branch: expected ${r} scheduled"; exit 1; }
+done
+trap - EXIT
+rm -f .tmp.oxoflow
+
 echo "PASS"

@@ -7,8 +7,8 @@
 #
 # Ported: seqfu, mash, fastani, checkm, gtdbtk, amrfinderplus, roary,
 # eggnog, gecco, cblaster, arts, bigscape, bigslice, automlst, deeptfactor,
-# lsabgc, alleleome, antismash v6 branch, prokka_gbk genbank-input path,
-# ncbi_genome_download, write_dependency_versions.
+# lsabgc, alleleome, ppanggolin, antismash v6 branch, prokka_gbk
+# genbank-input path, ncbi_genome_download, write_dependency_versions.
 #
 # NOT ported (with reasons):
 #   - metabase / build_warehouse: separate `bgcflow build warehouse`
@@ -994,3 +994,688 @@ Alleleome --path1 {input[0]} --path2 data/processed/{config.project}/alleleome/ 
 """
 [rules.environment]
 conda = "envs/alleleome.yaml"
+
+# ------------------------------------------------------------ ppanggolin ----
+# Upstream: rules/ppanggolin.smk + rules/ppanggolin_roary.smk + standalone
+# workflow/ppanggolin entrypoint, gated by pipelines.ppanggolin (FALSE by
+# default; needs run_roary for the genome_roary chain). Two parallel chains:
+# ppanggolin_genome (annotates the prokka GFFs itself) and
+# ppanggolin_genome_roary (seeds the clustering with the roary clusters via
+# prep_roary_cluster_to_mmseqs2_format.py). The write/draw subcommand rules
+# are a strict linear chain off pangenome.h5 (regions -> stats -> ... ->
+# spot_modules), matching upstream's chain one-to-one. ppanggolin_bgc_prep +
+# ppanggolin_BGC (the antismash-BGC panrgp chain) ported as run-block
+# extraction to scripts/ppanggolin_bgc_prep.py. Env is upstream's verbatim
+# pin (ppanggolin 1.2.105, no post-deploy). Scripts copied verbatim.
+[[rules]]
+name = "ppanggolin_bgc_prep"
+description = "build the antismash-BGC dataset table for panrgp (upstream ppanggolin_bgc_prep run-block)"
+when = "config.run_ppanggolin"
+input = ["data/interim/bgcs/{config.project}/{config.antismash_version}"]
+output = ["data/interim/ppanggolin/BGC/dataset/{config.project}_{config.antismash_version}.tsv"]
+log = "logs/ppanggolin/ppanggolin_bgc_prep-{config.project}.log"
+tags = ["bgc", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin 2>> {log}
+python scripts/ppanggolin_bgc_prep.py {input[0]} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "ppanggolin_BGC"
+description = "run ppanggolin panrgp over the antismash BGCs (upstream ppanggolin_BGC)"
+when = "config.run_ppanggolin"
+input = ["data/interim/ppanggolin/BGC/dataset/{config.project}_{config.antismash_version}.tsv"]
+output = ["data/ppanggolin/BGC/{config.project}_{config.antismash_version}"]
+log = "logs/ppanggolin/ppanggolin/ppanggolin_{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/ppanggolin 2>> {log}
+ppanggolin panrgp --anno {input} --cpu {threads} --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome"
+description = "full pangenome analysis over the prokka GFFs: annotate/cluster/graph/partition/rgp/spot/module/rarefaction/msa (upstream ppanggolin_genome)"
+when = "config.run_ppanggolin"
+expand_inputs = [
+    { pattern = "data/interim/prokka/{sample}/{sample}.gff", variables = { sample = "config.samples_list" } }
+]
+output = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/rarefaction",
+    "data/processed/{config.project}/ppanggolin/genome/msa_core",
+    "data/processed/{config.project}/ppanggolin/genome/msa_phylo",
+]
+log = "logs/ppanggolin/genome/ppanggolin_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome data/interim/tmp/ppanggolin/{config.project} 2>> {log}
+INPUT_GFF="data/interim/tmp/ppanggolin/{config.project}/prokka_gff.txt"
+ORGANISM_ANNOTATION_LIST="data/interim/tmp/ppanggolin/{config.project}/ORGANISM_ANNOTATION_LIST.txt"
+echo '{input}' > $INPUT_GFF
+echo "Preparing input data for ppanggolin..." >> {log}
+python scripts/prep_ppanggolin_from_roary.py "$INPUT_GFF" "$ORGANISM_ANNOTATION_LIST" 2>> {log}
+echo "##### 1. Running ppanggolin annotate... #####" >> {log}
+ppanggolin annotate --anno $ORGANISM_ANNOTATION_LIST --output data/processed/{config.project}/ppanggolin/genome --cpu {threads} --force --verbose 1 2>> {log}
+echo "##### 2. Building gene families with ppanggolin cluster... #####" >> {log}
+ppanggolin cluster -p {output[0]} --identity 0.8 --coverage 0.8 --cpu {threads} --verbose 1 2>> {log}
+echo "##### 3. Building pangenome graph with ppanggolin graph... #####" >> {log}
+ppanggolin graph -p {output[0]} --cpu {threads} --verbose 1 2>> {log}
+echo "##### 3. Partitioning graph with ppanggolin partition... #####" >> {log}
+ppanggolin partition -p {output[0]} --cpu {threads} --verbose 1 2>> {log}
+echo "#### 4. Predicting region of genome plasticity with ppanggolin rgp... ####" >> {log}
+ppanggolin rgp -p {output[0]} --cpu {threads} --verbose 1 2>> {log}
+echo "#### 5. Finding spots of insertion with ppanggolin spot... ####" >> {log}
+ppanggolin spot -p {output[0]} --cpu {threads} --verbose 1 2>> {log}
+echo "#### 6. Finding conserved modules with ppanggolin module... ####" >> {log}
+ppanggolin module -p {output[0]} --cpu {threads} --verbose 1 2>> {log}
+echo "#### 7. Calculating rarefaction curves with ppanggolin rarefaction... ####" >> {log}
+ppanggolin rarefaction -f --min 5 --max 30 --depth 10 -p {output[0]} --cpu {threads} --output {output[1]} 2>> {log}
+echo "#### 8. Building trees using ppanggolin msa... ####" >> {log}
+ppanggolin msa -f -p {output[0]} --partition core --output {output[2]} 2>> {log}
+ppanggolin msa -f -p {output[0]} --phylo --output {output[3]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_write_regions"
+description = "write RGP regions from the pangenome (upstream ppanggolin_genome_write_regions)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/rarefaction",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/regions"]
+log = "logs/ppanggolin/genome/write_regions_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin write -f -p {input[0]} --regions --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_write_stats"
+description = "write pangenome statistics (upstream ppanggolin_genome_write_stats)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/regions",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/stats"]
+log = "logs/ppanggolin/genome/write_stats_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin write -f -p {input[0]} --stats --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_write_spots"
+description = "write spots of insertion (upstream ppanggolin_genome_write_spots)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/stats",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/spots"]
+log = "logs/ppanggolin/genome/write_spots_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin write -f -p {input[0]} --spots --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_draw_ucurve"
+description = "draw the U-shaped presence/absence curve (upstream ppanggolin_genome_draw_ucurve)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/spots",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/ucurve"]
+log = "logs/ppanggolin/genome/draw_ucurve_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin draw -f -p {input[0]} --ucurve --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_draw_tile_plot"
+description = "draw the tile plot (upstream ppanggolin_genome_draw_tile_plot)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/ucurve",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/tile_plot"]
+log = "logs/ppanggolin/genome/tile_plot_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin draw -f -p {input[0]} --tile_plot --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_draw_tile_plot_nocloud"
+description = "draw the tile plot without cloud genes (upstream ppanggolin_genome_draw_tile_plot_nocloud)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/tile_plot",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/tile_plot_nocloud"]
+log = "logs/ppanggolin/genome/tile_plot_nocloud_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin draw -f -p {input[0]} --tile_plot --nocloud --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_draw_spots"
+description = "draw the spots of insertion (upstream ppanggolin_genome_draw_spots)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/tile_plot_nocloud",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/spots_draw"]
+log = "logs/ppanggolin/genome/draw_spots_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin draw -f -p {input[0]} --spots all --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_gexf"
+description = "write the pangenome graph as gexf/light gexf/json (upstream ppanggolin_genome_gexf)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/spots_draw",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/gexf"]
+log = "logs/ppanggolin/genome/gexf_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin write -f -p {input[0]} --light_gexf --output {output[0]} 2>> {log}
+ppanggolin write -f -p {input[0]} --gexf --output {output[0]} 2>> {log}
+ppanggolin write -f -p {input[0]} --json --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_gene_pres_abs"
+description = "write gene presence/absence Rtab + csv (upstream ppanggolin_genome_gene_pres_abs)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/gexf",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/gene_pres_abs"]
+log = "logs/ppanggolin/genome/gene_pres_abs_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin write -f -p {input[0]} --Rtab --output {output[0]} 2>> {log}
+ppanggolin write -f -p {input[0]} --csv --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_partitions"
+description = "write pangenome partitions (upstream ppanggolin_genome_partitions)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/gene_pres_abs",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/partitions"]
+log = "logs/ppanggolin/genome/partitions_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin write -f -p {input[0]} --partitions --output $(dirname {input[0]}) 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_projection"
+description = "write per-genome gene projections (upstream ppanggolin_genome_projection)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/partitions",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/projection"]
+log = "logs/ppanggolin/genome/projection_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin write -f -p {input[0]} --projection --output $(dirname {input[0]}) 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_families"
+description = "write gene family TSV (upstream ppanggolin_genome_families)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/projection",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/families"]
+log = "logs/ppanggolin/genome/families_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin write -f -p {input[0]} --families_tsv --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_borders"
+description = "write borders of RGP (upstream ppanggolin_genome_borders)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/families",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/borders"]
+log = "logs/ppanggolin/genome/borders_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin write -f -p {input[0]} --borders --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_modules"
+description = "write conserved modules (upstream ppanggolin_genome_modules)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/borders",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/modules"]
+log = "logs/ppanggolin/genome/modules_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin write -f -p {input[0]} --modules --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_spot_modules"
+description = "write spot modules (upstream ppanggolin_genome_spot_modules)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome/modules",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome/spot_modules"]
+log = "logs/ppanggolin/genome/spot_modules_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome 2>> {log}
+ppanggolin write -f -p {input[0]} --spot_modules --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary"
+description = "roary-seeded pangenome analysis over the prokka GFFs (upstream ppanggolin_genome_roary)"
+when = "config.run_ppanggolin"
+expand_inputs = [
+    { pattern = "data/interim/prokka/{sample}/{sample}.gff", variables = { sample = "config.samples_list" } }
+]
+input = ["data/interim/roary/{config.project}"]
+output = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/rarefaction",
+    "data/processed/{config.project}/ppanggolin/genome_roary/msa_core",
+    "data/processed/{config.project}/ppanggolin/genome_roary/msa_phylo",
+]
+log = "logs/ppanggolin/genome_roary/ppanggolin_roary_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary data/interim/tmp/ppanggolin/{config.project} 2>> {log}
+TMPDIR="data/interim/tmp/ppanggolin/{config.project}"
+OUTDIR=$(dirname {output[0]})
+mkdir -p $OUTDIR
+INPUT_GFF="$TMPDIR/prokka_gff_roary.txt"
+ORGANISM_ANNOTATION_LIST="$TMPDIR/ORGANISM_ANNOTATION_LIST_roary.txt"
+CLUSTERS_FILE="$TMPDIR/CLUSTERS_FILE.txt"
+echo '{input}' > $INPUT_GFF
+echo "Preparing input data for ppanggolin..." >> {log}
+python scripts/prep_ppanggolin_from_roary.py "$INPUT_GFF" "$ORGANISM_ANNOTATION_LIST" 2>> {log}
+echo "Converting Roary output to mmseqs2 format" >> {log}
+python scripts/prep_roary_cluster_to_mmseqs2_format.py {input[0]}/clustered_proteins $CLUSTERS_FILE 2>> {log}
+echo "##### 1 Running ppanggolin annotate... #####" >> {log}
+ppanggolin annotate --cpu {threads} --anno $ORGANISM_ANNOTATION_LIST --output $OUTDIR --force --verbose 1 2>> {log}
+echo "##### 2 Running ppanggolin cluster... #####" >> {log}
+ppanggolin cluster --cpu {threads} --identity 0.8 --coverage 0.8 -p {output[0]} --clusters $CLUSTERS_FILE --infer_singletons --verbose 1 2>> {log}
+echo "##### 3. Building pangenome graph with ppanggolin graph... #####" >> {log}
+ppanggolin graph -p {output[0]} --cpu {threads} --verbose 1 2>> {log}
+echo "##### 3. Partitioning graph with ppanggolin partition... #####" >> {log}
+ppanggolin partition -p {output[0]} --cpu {threads} --verbose 1 2>> {log}
+echo "#### 4. Predicting region of genome plasticity with ppanggolin rgp... ####" >> {log}
+ppanggolin rgp -p {output[0]} --cpu {threads} --verbose 1 2>> {log}
+echo "#### 5. Finding spots of insertion with ppanggolin spot... ####" >> {log}
+ppanggolin spot -p {output[0]} --cpu {threads} --verbose 1 2>> {log}
+echo "#### 6. Finding conserved modules with ppanggolin module... ####" >> {log}
+ppanggolin module -p {output[0]} --cpu {threads} --verbose 1 2>> {log}
+echo "#### 7. Calculating rarefaction curves with ppanggolin rarefaction... ####" >> {log}
+ppanggolin rarefaction -f --min 5 --max 50 --depth 30 -p {output[0]} --cpu {threads} --output {output[1]} 2>> {log}
+echo "#### 8. Building trees using ppanggolin msa... ####" >> {log}
+ppanggolin msa -f -p {output[0]} --partition core --output {output[2]} 2>> {log}
+ppanggolin msa -f -p {output[0]} --phylo --output {output[3]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_write_regions"
+description = "write RGP regions from the roary-seeded pangenome (upstream ppanggolin_genome_roary_write_regions)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/rarefaction",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/regions"]
+log = "logs/ppanggolin/genome_roary/write_regions_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin write -f -p {input[0]} --regions --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_write_stats"
+description = "write pangenome statistics (upstream ppanggolin_genome_roary_write_stats)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/regions",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/stats"]
+log = "logs/ppanggolin/genome_roary/write_stats_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin write -f -p {input[0]} --stats --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_write_spots"
+description = "write spots of insertion (upstream ppanggolin_genome_roary_write_spots)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/stats",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/spots"]
+log = "logs/ppanggolin/genome_roary/write_spots_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin write -f -p {input[0]} --spots --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_draw_ucurve"
+description = "draw the U-shaped presence/absence curve (upstream ppanggolin_genome_roary_draw_ucurve)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/spots",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/ucurve"]
+log = "logs/ppanggolin/genome_roary/draw_ucurve_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin draw -f -p {input[0]} --ucurve --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_draw_tile_plot"
+description = "draw the tile plot (upstream ppanggolin_genome_roary_draw_tile_plot)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/ucurve",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/tile_plot"]
+log = "logs/ppanggolin/genome_roary/tile_plot_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin draw -f -p {input[0]} --tile_plot --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_draw_tile_plot_nocloud"
+description = "draw the tile plot without cloud genes (upstream ppanggolin_genome_roary_draw_tile_plot_nocloud)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/tile_plot",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/tile_plot_nocloud"]
+log = "logs/ppanggolin/genome_roary/tile_plot_nocloud_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin draw -f -p {input[0]} --tile_plot --nocloud --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_draw_spots"
+description = "draw the spots of insertion (upstream ppanggolin_genome_roary_draw_spots)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/tile_plot_nocloud",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/spots_draw"]
+log = "logs/ppanggolin/genome_roary/draw_spots_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin draw -f -p {input[0]} --spots all --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_gexf"
+description = "write the pangenome graph as gexf/light gexf/json (upstream ppanggolin_genome_roary_gexf)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/spots_draw",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/gexf"]
+log = "logs/ppanggolin/genome_roary/gexf_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin write -f -p {input[0]} --light_gexf --output {output[0]} 2>> {log}
+ppanggolin write -f -p {input[0]} --gexf --output {output[0]} 2>> {log}
+ppanggolin write -f -p {input[0]} --json --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_gene_pres_abs"
+description = "write gene presence/absence Rtab + csv (upstream ppanggolin_genome_roary_gene_pres_abs)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/gexf",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/gene_pres_abs"]
+log = "logs/ppanggolin/genome_roary/gene_pres_abs_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin write -f -p {input[0]} --Rtab --output {output[0]} 2>> {log}
+ppanggolin write -f -p {input[0]} --csv --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_partitions"
+description = "write pangenome partitions (upstream ppanggolin_genome_roary_partitions)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/gene_pres_abs",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/partitions"]
+log = "logs/ppanggolin/genome_roary/partitions_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin write -f -p {input[0]} --partitions --output $(dirname {input[0]}) 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_projection"
+description = "write per-genome gene projections (upstream ppanggolin_genome_roary_projection)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/partitions",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/projection"]
+log = "logs/ppanggolin/genome_roary/projection_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin write -f -p {input[0]} --projection --output $(dirname {input[0]}) 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_families"
+description = "write gene family TSV (upstream ppanggolin_genome_roary_families)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/projection",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/families"]
+log = "logs/ppanggolin/genome_roary/families_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin write -f -p {input[0]} --families_tsv --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_borders"
+description = "write borders of RGP (upstream ppanggolin_genome_roary_borders)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/families",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/borders"]
+log = "logs/ppanggolin/genome_roary/borders_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin write -f -p {input[0]} --borders --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_modules"
+description = "write conserved modules (upstream ppanggolin_genome_roary_modules)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/borders",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/modules"]
+log = "logs/ppanggolin/genome_roary/modules_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin write -f -p {input[0]} --modules --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
+
+[[rules]]
+name = "ppanggolin_genome_roary_spot_modules"
+description = "write spot modules (upstream ppanggolin_genome_roary_spot_modules)"
+when = "config.run_ppanggolin"
+input = [
+    "data/processed/{config.project}/ppanggolin/genome_roary/pangenome.h5",
+    "data/processed/{config.project}/ppanggolin/genome_roary/modules",
+]
+output = ["data/processed/{config.project}/ppanggolin/genome_roary/spot_modules"]
+log = "logs/ppanggolin/genome_roary/spot_modules_{config.project}.log"
+tags = ["pangenome", "ppanggolin"]
+shell = """
+mkdir -p logs/ppanggolin/genome_roary 2>> {log}
+ppanggolin write -f -p {input[0]} --spot_modules --output {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/ppanggolin.yaml"
