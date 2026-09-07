@@ -7,7 +7,7 @@
 #
 # Ported: seqfu, mash, fastani, checkm, gtdbtk, amrfinderplus, roary,
 # eggnog, gecco, cblaster, arts, bigscape, bigslice, automlst, deeptfactor,
-# lsabgc, antismash v6 branch, prokka_gbk genbank-input path,
+# lsabgc, alleleome, antismash v6 branch, prokka_gbk genbank-input path,
 # ncbi_genome_download, write_dependency_versions.
 #
 # NOT ported (with reasons):
@@ -933,3 +933,64 @@ lsaBGC-AutoAnalyze.py -i {input[1]}/Final_Results/Primary_Sample_Annotation_File
 """
 [rules.environment]
 conda = "envs/lsabgc.yaml"
+
+# --------------------------------------------------------------- alleleome ----
+# Upstream: rules/alleleome.smk + standalone workflow/alleleome entrypoint
+# (rule names carry no alleleome prefix — prepare_alleleome etc.), gated by
+# pipelines.alleleome (FALSE by default). Needs roary (run_roary) — upstream
+# chains alleleome off the pangenome. Env is upstream's verbatim pin set
+# (Core-Alleleome v0.1.0 pip-installed from GitHub in-env, no post-deploy).
+# Scripts copied verbatim from workflow/scripts/.
+[[rules]]
+name = "prepare_alleleome"
+description = "reassign roary pangenome categories to pangene v2 (upstream prepare_alleleome)"
+when = "config.run_alleleome"
+input = ["data/interim/roary/{config.project}/summary_statistics.txt"]
+output = ["data/processed/{config.project}/alleleome/pangene_v2.csv"]
+log = "logs/prepare_alleleome/{config.project}.log"
+tags = ["pangenome", "alleleome"]
+shell = """
+mkdir -p logs/prepare_alleleome data/processed/{config.project}/alleleome 2>> {log}
+python scripts/alleleome_reassign_pangene_categories.py --data-dir data/interim/roary/{config.project} --output-file {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/alleleome.yaml"
+
+[[rules]]
+name = "prepare_alleleome_fasta"
+description = "extract core-gene fasta alignments from roary + genbanks (upstream prepare_alleleome_fasta)"
+when = "config.run_alleleome"
+input = [
+    "data/interim/roary/{config.project}/summary_statistics.txt",
+    "data/processed/{config.project}/alleleome/pangene_v2.csv",
+]
+expand_inputs = [
+    { pattern = "data/interim/processed-genbank/{sample}.gbk", variables = { sample = "config.samples_list" } }
+]
+output = ["data/processed/{config.project}/alleleome/pangenome_alignments"]
+log = "logs/prepare_alleleome_fasta/{config.project}.log"
+tags = ["pangenome", "alleleome"]
+shell = """
+mkdir -p logs/prepare_alleleome_fasta 2>> {log}
+python scripts/alleleome_get_core_genes_fasta.py --roary_path data/interim/roary/{config.project} --gbk_folder data/interim/processed-genbank --pangene_summary_path {input[1]} --output_folder data/processed/{config.project}/alleleome 2>> {log}
+"""
+[rules.environment]
+conda = "envs/alleleome.yaml"
+
+[[rules]]
+name = "alleleome"
+description = "run Core-Alleleome dN/dS analysis over the alignments (upstream alleleome)"
+when = "config.run_alleleome"
+input = [
+    "data/processed/{config.project}/alleleome/pangenome_alignments",
+    "data/processed/{config.project}/alleleome/pangene_v2.csv",
+]
+output = ["data/processed/{config.project}/alleleome/pan_core_gene_syno_non_syno_df.csv"]
+log = "logs/alleleome/{config.project}.log"
+tags = ["pangenome", "alleleome"]
+shell = """
+mkdir -p logs/alleleome 2>> {log}
+Alleleome --path1 {input[0]} --path2 data/processed/{config.project}/alleleome/ --table {input[1]} --log_to_terminal 2>> {log}
+"""
+[rules.environment]
+conda = "envs/alleleome.yaml"

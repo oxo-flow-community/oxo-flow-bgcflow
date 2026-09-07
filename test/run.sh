@@ -29,4 +29,14 @@ done
 trap - EXIT
 rm -f .tmp.oxoflow
 
+echo "==> branch-flip: run_alleleome=true shows the 3 alleleome rules"
+sed -e 's/^run_alleleome = false/run_alleleome = true/' main.oxoflow > .tmp.oxoflow
+trap 'rm -f .tmp.oxoflow /tmp/oxo-dryrun-alleleome-*.txt' EXIT
+"$OXO" dry-run .tmp.oxoflow --samples first:1 > /tmp/oxo-dryrun-alleleome-$$.txt 2>&1
+for r in prepare_alleleome prepare_alleleome_fasta alleleome; do
+    grep -qE "^  [0-9]+\. ${r}  \[run" /tmp/oxo-dryrun-alleleome-$$.txt || { echo "alleleome branch: expected ${r} scheduled"; exit 1; }
+done
+trap - EXIT
+rm -f .tmp.oxoflow
+
 echo "PASS"

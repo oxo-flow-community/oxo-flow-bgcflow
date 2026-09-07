@@ -61,6 +61,7 @@ run_query_bigslice = false          # upstream pipelines.query-bigslice (needs t
 run_automlst = false                # upstream pipelines.automlst-wrapper
 run_deeptfactor = false             # upstream pipelines.deeptfactor
 run_lsabgc = false                  # upstream pipelines.lsabgc (standalone workflow/lsabgc entrypoint)
+run_alleleome = false               # upstream pipelines.alleleome (needs run_roary)
 project_source = "custom"
 ncbi_genera = ""
 write_dependency_versions = false
