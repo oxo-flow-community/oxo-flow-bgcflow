@@ -13,7 +13,7 @@
   },
   "created": "2026-08-15",
   "domain": "genome-mining",
-  "tags": ["bgc", "secondary-metabolites", "antismash", "genome-mining", "prokka", "gtdb", "mibig", "snakemake"],
+  "tags": ["bgc", "secondary-metabolites", "antismash", "genome-mining", "prokka", "gtdb", "mibig", "snakemake", "metabase", "duckdb", "warehouse"],
   "scope": [
     "copy_custom_fasta",
     "gtdb_prep",
@@ -77,14 +77,14 @@
     "deeptfactor_summary"
   ],
   "excluded": [
-    "metabase_install / metabase_duckdb_plugin / build_warehouse — metabase.smk + build-database.smk are not in the main Snakefile; upstream runs them via its own entrypoint `workflow/Metabase` / `workflow/Database` (`snakemake --snakefile workflow/<Name>`), which has no oxo-flow port — note there is **no** wrapper CLI: `workflow/bgcflow/bgcflow/cli.py` is a console-script stub and the README's `bgcflow build report` is unimplemented; the warehouse branch additionally needs a live Metabase server + credentials",
+    "metabase_install / metabase_duckdb_plugin / build_warehouse — metabase.smk + build-database.smk are not in the main Snakefile; upstream runs them via its own entrypoint `workflow/Metabase` / `workflow/Database` (`snakemake --snakefile workflow/<Name>`), which has no oxo-flow port — note there is **no** wrapper CLI: `workflow/bgcflow/bgcflow/cli.py` is a console-script stub and the README's `bgcflow build report` is unimplemented; the warehouse branch additionally needs a live Metabase server + credentials. LIVE-VERIFIED 2026-09-08 (bioinfo-wsx): upstream Metabase v0.49.6 jar (363MB) + duckdb driver 0.2.8 (66MB) downloaded from the pinned URLs, server booted with the upstream env vars (java 17, -Xms2g), /api/setup succeeded with the upstream setup params, a duckdb warehouse registered via engine=duckdb/database_file (details key must be `database_file`, not `db` — the `db` key raises a driver NPE), table sync + /api/dataset SQL + a saved card all ran against the warehouse. See README 'Metabase live verification' and issue #4",
     "patric_genome_download / download_patric_tables / extract_patric_meta — download endpoint ftp.patricbrc.org is dead: PATRIC was decommissioned in 2023 (merged into BV-BRC); verified 550 / connection refused 2026-08-06",
     "report rules (copy_readme, copy_template_notebook, mkdocs_py_report, mkdocs_rpy_report, copy_template_rnotebook) — upstream `report.smk` has no entrypoint include at all (the advertised `bgcflow build report` CLI is unimplemented upstream); no pipeline gate to mirror",
     "Upstream subworkflow entrypoints with no oxo-flow coverage: PPanGGOLiN (`workflow/ppanggolin`, 26 rules incl. ppanggolin_roary), LsABGC (`workflow/lsabgc`, 5), Alleleome (`workflow/Alleleome`, 3), BGC comparison (`workflow/BGC`, 19: clinker / interproscan / mmseqs2 / getphylo / downstream_bgc_prep_selection), Database extras (6: antismash_json_extract / build_dna_sequences_table / build_regions_table / build_cdss_table / get_dbt_template / build_database) + antismash_db_duckdb — none reachable from the main Snakefile entrypoint, none ported",
     "Upstream rules acknowledged group-wise in the README fidelity table without ported counterparts: checkm_out, gtdbtk_fna_fail + evaluate_gtdbtk_input, prokka_db_setup, bigscape_no_mibig + bigscape_to_cytoscape + copy_bigscape (install_bigscape group), arts_extract + 7 arts_* combine/final rules (install pydude... group), roary_reassign_pangene_categories + eggnog_roary + eggnog_roary_result_copy + deeptfactor_roary + diamond_roary, cblaster_bgc_db, antismash_sideload_gecco + gecco_aggregate — see the README fidelity table for the full list"
   ],
   "rule_count": 125,
-  "tools": ["prokka", "antismash", "python", "pandas", "pyarrow", "biopython", "requests", "alive_progress", "lsaBGC", "Core-Alleleome", "PPanGGOLiN", "clinker", "InterProScan", "mmseqs2", "getphylo", "diamond", "mlst", "refseq_masher"],
+  "tools": ["prokka", "antismash", "python", "pandas", "pyarrow", "biopython", "requests", "alive_progress", "lsaBGC", "Core-Alleleome", "PPanGGOLiN", "clinker", "InterProScan", "mmseqs2", "getphylo", "diamond", "mlst", "refseq_masher", "metabase", "duckdb"],
   "description": "End-to-end biosynthetic gene cluster (BGC) analysis of user-provided bacterial genomes: prokka annotation, antiSMASH 7 secondary-metabolite mining with automated database setup, per-genome BGC counts and overview tables, GTDB taxonomy lookup, MIBiG reference table download, BigSCAPE-compatible comparison preparation (symlinks, taxonomy, dataset registry, visualization mapping), and conversion of all result tables into a parquet data warehouse — ready for downstream comparison and exploration.",
   "installation": {
     "engine": "oxo-flow >= 0.12.0",

@@ -144,7 +144,7 @@ attribution in [NOTICE.md](NOTICE.md).
 | mlst | `mlst` | mlst 2.19.0 | `when = config.run_mlst`; upstream has no rules.yaml gate — ported with a fresh gate; `mlst --csv` per genome (pubmlst schemes on demand) |
 | refseq_masher | `refseq_masher` | refseq-masher 0.1.2 | `when = config.run_refseq_masher`; upstream has no rules.yaml gate — ported with a fresh gate; `refseq_masher matches --top-n-results 10` (RefSeq sketch download on first run) |
 | get_project_metadata | `get_project_metadata` | python | `when = config.run_get_project_metadata`; upstream has no rules.yaml gate — ported with a fresh gate; scripts/get_project_metadata.py adapted port (same JSON: description/rule_used/sample_size/references/bgcflow_version; assembled from main.oxoflow gates + the verbatim config/rules_dict.yaml copy, no peppy) |
-| metabase_install / metabase_duckdb_plugin / build_warehouse | not ported | metabase/duckdb | metabase.smk + build-database.smk are not in the main Snakefile; upstream reaches them via its own entrypoint `workflow/Metabase` / `workflow/Database` (`snakemake --snakefile workflow/<Name>`) — no oxo-flow port of those entrypoints. There is no wrapper CLI: `workflow/bgcflow/bgcflow/cli.py` is a console-script stub and the advertised `bgcflow build report` is unimplemented; the warehouse branch additionally needs a live Metabase server + credentials |
+| metabase_install / metabase_duckdb_plugin / build_warehouse | not ported | metabase/duckdb | metabase.smk + build-database.smk are not in the main Snakefile; upstream reaches them via its own entrypoint `workflow/Metabase` / `workflow/Database` (`snakemake --snakefile workflow/<Name>`) — no oxo-flow port of those entrypoints. There is no wrapper CLI: `workflow/bgcflow/bgcflow/cli.py` is a console-script stub and the advertised `bgcflow build report` is unimplemented; the warehouse branch additionally needs a live Metabase server + credentials. Upstream toolchain **live-verified** (see [Metabase live verification](#metabase-live-verification-bioinfo-wsx-2026-09-08)) |
 | ncbi_genome_download / extract_ncbi_information (+ patric meta rules) | `ncbi_genome_download` | ncbi-genome-download | `when = config.project_source == 'ncbi'`; deviation: bulk genus download via `--genera` (upstream fetches per-accession with `-A`); extract_ncbi_information / download_patric_tables / extract_patric_meta meta rules not ported |
 | patric_genome_download + patric meta rules | not ported | patric | per-sample source=patric; download endpoint ftp.patricbrc.org is dead (PATRIC decommissioned 2023, merged into BV-BRC; verified 550/connection-refused 2026-08) |
 | copy_custom_genbank / genbank_to_fna + genbank_to_faa / extract_meta_genbank / genbank_to_gff / copy_converted_gbk / summarize_converted_gbk | `copy_custom_genbank` / `genbank_to_fna` | python | gbk-input path (`input_type = 'gbk'`); genbank_to_fna reads the raw gbk directly (upstream uses input-function branching to avoid the producer overlap); the faa/gff/meta/summary extras not ported |
@@ -203,6 +203,31 @@ interproscan / mmseqs2 / getphylo (BGC comparison branch: interproscan
 downloads the ~600MB 5.60-92.0 tarball from EBI; clinker/getphylo are pip
 tools with their own diamond/muscle/fasttree deps; mmseqs2 chains need
 sizeable BGC sets to produce meaningful clusters).
+
+## Metabase live verification (bioinfo-wsx, 2026-09-08)
+
+The metabase/warehouse chain stays **excluded** (it lives behind upstream's
+separate `workflow/Metabase` / `workflow/Database` Snakefile entrypoints, not
+the main Snakefile — no gate to mirror), but the upstream toolchain was
+verified end-to-end on bioinfo-wsx so the exclusion is evidence-based rather
+than assumed:
+
+| Step | Result |
+|---|---|
+| jar downloads (upstream wget URLs, pinned) | metabase v0.49.6 jar 363,516,778 B (md5 05f519d0…); duckdb driver 0.2.8 66,396,134 B — both from `downloads.metabase.com` / `MotherDuck-Open-Source` release URL as in `workflow/rules/metabase.smk` |
+| server boot | upstream env vars verbatim (java 17, `-Xms2g -Xmx8g`, `MB_SETUP_TOKEN`, plugin dir); `/api/health` 200; log: `Metabase v0.49.6 (5abf130)`, `Registered driver :duckdb` |
+| `/api/setup` | succeeded with upstream `setup_params` (site_name BGCFlow, admin@bgcflow.com); login verified via `/api/user/current` |
+| warehouse registration | engine=duckdb over a real `.duckdb` file → database id 2, initial sync complete, table metadata synced |
+| SQL + saved card | `POST /api/dataset` native query → completed (product counts); saved card query → same rows |
+
+Gotchas recorded for future work: (1) the duckdb driver's `details` key is
+**`database_file`**, not `db` — the wrong key raises a driver NPE
+(`Cannot invoke "java.lang.CharSequence.length()"`, confirmed in the
+plugin's `duckdb.clj` jdbc_spec); (2) the driver rejects bare `.parquet`
+files — the warehouse must be a real `.duckdb` database (upstream builds
+one via dbt); (3) H2 persistence (`metabase.db.mv.db`) keeps users across
+restarts, so a second `/api/setup` returns "can only be used to create the
+first user" — log in instead.
 
 ## License
 
