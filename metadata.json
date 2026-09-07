@@ -39,8 +39,8 @@
     "patric_genome_download / download_patric_tables / extract_patric_meta — download endpoint ftp.patricbrc.org is dead: PATRIC was decommissioned in 2023 (merged into BV-BRC); verified 550 / connection refused 2026-08",
     "report rules (copy_readme, copy_template_notebook, mkdocs_py_report, mkdocs_rpy_report, copy_template_rnotebook) — separate 'bgcflow build report' entrypoint (wrapper CLI), not part of the main Snakefile default path"
   ],
-  "rule_count": 102,
-  "tools": ["prokka", "antismash", "python", "pandas", "pyarrow", "biopython", "requests", "alive_progress", "lsaBGC", "Core-Alleleome", "PPanGGOLiN"],
+  "rule_count": 121,
+  "tools": ["prokka", "antismash", "python", "pandas", "pyarrow", "biopython", "requests", "alive_progress", "lsaBGC", "Core-Alleleome", "PPanGGOLiN", "clinker", "InterProScan", "mmseqs2", "getphylo"],
   "description": "End-to-end biosynthetic gene cluster (BGC) analysis of user-provided bacterial genomes: prokka annotation, antiSMASH 7 secondary-metabolite mining with automated database setup, per-genome BGC counts and overview tables, GTDB taxonomy lookup, MIBiG reference table download, BigSCAPE-compatible comparison preparation (symlinks, taxonomy, dataset registry, visualization mapping), and conversion of all result tables into a parquet data warehouse — ready for downstream comparison and exploration.",
   "installation": {
     "engine": "oxo-flow >= 0.12.0",

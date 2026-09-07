@@ -133,6 +133,10 @@ attribution in [NOTICE.md](NOTICE.md).
 | install_lsabgc_db / lsabgc_prepare / lsabgc_ready / lsabgc_prepare_tax / lsabgc_autoanalyze | same names | lsaBGC 1.52 (env) | `when = config.run_lsabgc`; standalone workflow/lsabgc entrypoint; lsaBGC software installed by install_lsabgc_db (upstream env post-deploy equivalent); lsabgc_ready consumes the port's bigscape output path (upstream layout differs); prepare run-blocks extracted to scripts/lsabgc_prepare{,_tax}.py |
 | prepare_alleleome / prepare_alleleome_fasta / alleleome | same names | Core-Alleleome 0.1.0 (env pip) | `when = config.run_alleleome`; needs run_roary (upstream chains alleleome off the pangenome); env is upstream's verbatim pin set (Core-Alleleome v0.1.0 pip-installed from GitHub in-env); scripts copied verbatim |
 | ppanggolin_bgc_prep + ppanggolin_BGC / ppanggolin_genome + 15 write/draw rules / ppanggolin_genome_roary + 15 write/draw rules | same names | PPanGGOLiN 1.2.105 | `when = config.run_ppanggolin`; both chains ported one-to-one (workflow/ppanggolin entrypoint incl. ppanggolin_roary.smk); genome_roary seeds clustering from roary (--clusters + --infer_singletons); ppanggolin_bgc_prep run-block extracted to scripts/ppanggolin_bgc_prep.py; env verbatim (ppanggolin 1.2.105, no post-deploy) |
+| antismash_colourmap / prep_clinker / clinker_gene_functions / clinker / clinker_extract | same names | clinker 0.0.28 | `when = config.run_clinker`; workflow/BGC comparison entrypoint (clinker.smk); input = downstream_bgc_prep symlink dir (upstream get_bgc_inputs lambda); prep_clinker.py / clinker_extract.py / get_antismash_gene_kind.py verbatim |
+| install_interproscan / prepare_aa_interproscan / interproscan | same names | InterProScan 5.60-92.0 | `when = config.run_interproscan`; workflow/BGC comparison entrypoint (interproscan.smk); install rule downloads the ~600MB EBI tarball + property setup + 2 self-tests (resource-gated, never run in tests); create_aa.py verbatim; appl TIGRFAM,PFAM |
+| prep_gbk_mmseqs2 / prepare_aa_mmseqs2 / minimap2 / mmseqs2_easy_cluster / mmseqs2 / mmseqs2_extract / mmseqs2_extract_cog / mmseqs2_annotate_cog / mmseq_all | same names | mmseqs2 + minimap2 + any2fasta | `when = config.run_mmseqs2`; workflow/BGC comparison entrypoint (mmseqs2.smk); mmseq_all has no env upstream (kept env-less); mmseqs2_extract.py needs networkx (added to bgc_analytics.yaml, unpinned upstream) |
+| getphylo_prep / getphylo | same names | getphylo 0.2.1 | `when = config.run_getphylo`; workflow/BGC comparison entrypoint (getphylo.smk); upstream uses 8 threads, port uses the global threads; env verbatim (diamond + muscle<5 + fasttree) |
 | cblaster_genome_db / cblaster_bgc_db | `cblaster_genome_db` | cblaster 1.3.18 | `when = config.run_cblaster`; verbatim makedb over prokka GBKs; cblaster_bgc_db (MIBiG-BGC database build) not ported |
 | gecco / antismash_sideload_gecco / gecco_aggregate | `gecco` | gecco 0.9.10 | `when = config.run_gecco`; verbatim gecco run --antismash-sideload; antismash_sideload_gecco + gecco_aggregate (report tables) not ported |
 | amrfinderplus / amrfinder_gather | `amrfinderplus` / `amrfinder_gather` | ncbi-amrfinderplus | `when = config.run_amrfinderplus`; verbatim flags; gather_amrfinder.py verbatim |
@@ -168,7 +172,11 @@ dependencies), bigslice (models ~490MB + BiG-FAM bundle ~18GB),
 automlst (python 2.7 tool download), deeptfactor (git-cloned model bundle),
 lsabgc (lsaBGC-database download + lsaBGC v1.52 install), alleleome
 (Core-Alleleome pip install; needs roary), ppanggolin (env build +
-pangenome compute; needs roary for the genome_roary chain).
+pangenome compute; needs roary for the genome_roary chain), clinker /
+interproscan / mmseqs2 / getphylo (BGC comparison branch: interproscan
+downloads the ~600MB 5.60-92.0 tarball from EBI; clinker/getphylo are pip
+tools with their own diamond/muscle/fasttree deps; mmseqs2 chains need
+sizeable BGC sets to produce meaningful clusters).
 
 ## License
 

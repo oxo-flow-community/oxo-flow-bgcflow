@@ -8,7 +8,8 @@
 # Ported: seqfu, mash, fastani, checkm, gtdbtk, amrfinderplus, roary,
 # eggnog, gecco, cblaster, arts, bigscape, bigslice, automlst, deeptfactor,
 # lsabgc, alleleome, ppanggolin, antismash v6 branch, prokka_gbk
-# genbank-input path, ncbi_genome_download, write_dependency_versions.
+# genbank-input path, ncbi_genome_download, write_dependency_versions,
+# clinker, interproscan, mmseqs2, getphylo (BGC comparison entrypoint).
 #
 # NOT ported (with reasons):
 #   - metabase / build_warehouse: separate `bgcflow build warehouse`
@@ -1679,3 +1680,394 @@ ppanggolin write -f -p {input[0]} --spot_modules --output {output[0]} 2>> {log}
 """
 [rules.environment]
 conda = "envs/ppanggolin.yaml"
+
+# --------------------------------------------------------- bgc comparison ----
+# Upstream: rules/clinker.smk (5), rules/interproscan.smk (3),
+# rules/mmseqs2.smk (9), rules/getphylo.smk (2) — the 19 comparison rules of
+# the standalone workflow/BGC entrypoint, gated there via the
+# workflow/rules_bgc.yaml final_outputs (clinker.csv /
+# interproscan_as_{version}.tsv / mmseqs2/{version}.tag / getphylo dir)
+# instead of config flags. This port mirrors them under four when-gates
+# (run_clinker / run_interproscan / run_mmseqs2 / run_getphylo, all false —
+# the upstream entrypoint has no run_X flags to copy). The upstream
+# bgc_selection.smk downstream_bgc_prep_selection (peppy multi-project
+# variant) is NOT ported: main.oxoflow already has the single-project
+# equivalent downstream_bgc_prep (same three helper scripts, same
+# datasets.tsv registry).
+#
+# Divergences (documented):
+#   - Upstream resolves inputs via get_bgc_inputs(PEP_PROJECTS[name],
+#     version) (peppy multi-project lambda). This port consumes the
+#     downstream_bgc_prep symlink tree data/interim/bgcs/{project}/
+#     {antismash_version}/ (upstream get_bgc_inputs returns exactly that
+#     folder's region genbanks for the single-project case), so every rule
+#     chains off downstream_bgc_prep instead of the lambda.
+#   - {name}/{version} wildcards -> {config.project}/
+#     {config.antismash_version} (port is single-project).
+#   - prep_clinker.py / create_aa.py take a space-separated file list; the
+#     symlink dir is passed as one directory argument (both scripts are
+#     upstream-verbatim; prep_clinker.py globs nothing — it needs the file
+#     list, so the rules expand the dir via $(ls ...)). mmseqs2 upstream
+#     uses the same GBKS=$(ls ...) pattern (prepare_aa_mmseqs2).
+#   - threads: clinker 4, interproscan 4, mmseqs2 4, getphylo 8 upstream;
+#     the port uses the global threads (4) for all — getphylo -c {threads}
+#     documented.
+[[rules]]
+name = "antismash_colourmap"
+description = "clinker colour map for antismash BGC types (upstream antismash_colourmap)"
+when = "config.run_clinker"
+output = ["data/interim/clinker/colours.txt"]
+log = "logs/clinker/antismash_colourmap.log"
+tags = ["bgc", "clinker"]
+shell = """
+mkdir -p logs/clinker
+echo "biosynthetic,#810e15" > {output[0]} 2>> {log}
+echo "biosynthetic-additional,#f16d75" >> {output[0]} 2>> {log}
+echo "transport,#6495ed" >> {output[0]} 2>> {log}
+echo "regulatory,#2e8b57" >> {output[0]} 2>> {log}
+echo "other,#808080" >> {output[0]} 2>> {log}
+echo "resistance,#ffc24b" >> {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "prep_clinker"
+description = "rename antismash region genbanks to their original ids (upstream prep_clinker)"
+when = "config.run_clinker"
+input = ["data/interim/bgcs/{config.project}/{config.antismash_version}"]
+output = ["data/interim/clinker/{config.project}/{config.antismash_version}"]
+log = "logs/clinker/prep_clinker_{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "clinker"]
+shell = """
+mkdir -p logs/clinker 2>> {log}
+python scripts/prep_clinker.py "$(ls {input[0]}/*.gbk | tr '\\n' ' ')" {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "clinker_gene_functions"
+description = "extract antismash gene_kind qualifiers per CDS (upstream clinker_gene_functions)"
+when = "config.run_clinker"
+input = ["data/interim/clinker/{config.project}/{config.antismash_version}"]
+output = ["data/interim/clinker/{config.project}/{config.antismash_version}__gene_functions.csv"]
+log = "logs/clinker/clinker_gene_functions_{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "clinker"]
+shell = """
+mkdir -p logs/clinker 2>> {log}
+python scripts/get_antismash_gene_kind.py {input[0]} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "clinker"
+description = "cluster-link BGCs with clinker (upstream clinker)"
+when = "config.run_clinker"
+input = [
+    "data/interim/clinker/{config.project}/{config.antismash_version}",
+    "data/interim/clinker/colours.txt",
+    "data/interim/clinker/{config.project}/{config.antismash_version}__gene_functions.csv",
+]
+output = [
+    "data/processed/{config.project}/clinker/{config.antismash_version}/clinker.txt",
+    "data/processed/{config.project}/clinker/{config.antismash_version}/clinker.html",
+]
+log = "logs/clinker/clinker-{config.antismash_version}-{config.project}.log"
+tags = ["bgc", "clinker"]
+shell = """
+mkdir -p logs/clinker 2>> {log}
+clinker {input[0]}/*.gbk -gf {input[2]} -cm {input[1]} -j {threads} -o {output[0]} -p {output[1]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/clinker.yaml"
+
+[[rules]]
+name = "clinker_extract"
+description = "extract clinker network to a table (upstream clinker_extract)"
+when = "config.run_clinker"
+input = [
+    "data/interim/clinker/{config.project}/{config.antismash_version}",
+    "data/processed/{config.project}/clinker/{config.antismash_version}/clinker.txt",
+]
+output = ["data/processed/{config.project}/clinker/{config.antismash_version}/clinker.csv"]
+log = "logs/clinker/clinker_extract-{config.antismash_version}-{config.project}.log"
+tags = ["bgc", "clinker"]
+shell = """
+mkdir -p logs/clinker 2>> {log}
+python scripts/clinker_extract.py {input[1]} {input[0]} {output[0]} 0.7 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+# ---------------------------------------------------------- interproscan ----
+# upstream interproscan_version = "5.60-92.0" (module-level constant)
+[[rules]]
+name = "install_interproscan"
+description = "download and self-test InterProScan 5.60-92.0 (upstream install_interproscan; ~600MB tarball + java property setup + two self-test runs)"
+when = "config.run_interproscan"
+output = ["resources/interproscan/interproscan-5.60-92.0"]
+log = "logs/interproscan/install_interproscan.log"
+tags = ["annotation", "interproscan"]
+shell = """
+mkdir -p logs/interproscan 2>> {log}
+java --version >> {log} 2>&1
+wget -P resources https://ftp.ebi.ac.uk/pub/software/unix/iprscan/5/5.60-92.0/interproscan-5.60-92.0-64-bit.tar.gz -nc 2>> {log}
+wget -P resources https://ftp.ebi.ac.uk/pub/software/unix/iprscan/5/5.60-92.0/interproscan-5.60-92.0-64-bit.tar.gz.md5 -nc 2>> {log}
+if [ ! -d "resources/interproscan/interproscan-5.60-92.0" ]; then
+    mkdir -p resources/interproscan
+    (cd resources && md5sum -c interproscan-5.60-92.0-64-bit.tar.gz.md5) 2>> {log}
+    (cd resources && tar -pxvzf interproscan-5.60-92.0-64-bit.tar.gz && mv interproscan-5.60-92.0 interproscan/) 2>> {log}
+else
+    echo "InterProScan is extracted in resources/interproscan/interproscan-5.60-92.0." >> {log}
+fi
+(cd resources/interproscan/interproscan-5.60-92.0 && python3 setup.py interproscan.properties) 2>> {log}
+(cd resources/interproscan/interproscan-5.60-92.0 && ./interproscan.sh -i test_all_appl.fasta -f tsv -dp) 2>> {log}
+(cd resources/interproscan/interproscan-5.60-92.0 && ./interproscan.sh -i test_all_appl.fasta -f tsv) 2>> {log}
+"""
+[rules.environment]
+conda = "envs/utilities.yaml"
+
+[[rules]]
+name = "prepare_aa_interproscan"
+description = "concatenate CDS translations from the renamed region genbanks (upstream prepare_aa_interproscan, misc/create_aa.py)"
+when = "config.run_interproscan"
+input = ["data/interim/bgcs/{config.project}/{config.antismash_version}"]
+output = ["data/interim/interproscan/{config.project}_{config.antismash_version}.faa"]
+log = "logs/interproscan/create_aa_{config.project}_{config.antismash_version}.log"
+tags = ["annotation", "interproscan"]
+shell = """
+mkdir -p logs/interproscan 2>> {log}
+python scripts/create_aa.py "$(ls {input[0]}/*.gbk | tr '\\n' ' ')" {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "interproscan"
+description = "run InterProScan (TIGRFAM,PFAM) over the antismash CDS translations (upstream interproscan)"
+when = "config.run_interproscan"
+input = [
+    "data/interim/interproscan/{config.project}_{config.antismash_version}.faa",
+    "resources/interproscan/interproscan-5.60-92.0",
+]
+output = [
+    "data/processed/{config.project}/tables/interproscan_as_{config.antismash_version}.tsv",
+    "data/processed/{config.project}/tables/interproscan_as_{config.antismash_version}.json",
+]
+log = "logs/interproscan/{config.project}_{config.antismash_version}.log"
+tags = ["annotation", "interproscan"]
+shell = """
+mkdir -p logs/interproscan 2>> {log}
+{input[1]}/interproscan.sh -appl TIGRFAM,PFAM -cpu {threads} -d data/interim/interproscan -f TSV,JSON -i {input[0]} --verbose 2>> {log}
+mv data/interim/interproscan/{config.project}_{config.antismash_version}.faa.tsv {output[0]} 2>> {log}
+mv data/interim/interproscan/{config.project}_{config.antismash_version}.faa.json {output[1]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/utilities.yaml"
+
+[[rules]]
+name = "prep_gbk_mmseqs2"
+description = "rename antismash region genbanks for mmseqs2 (upstream prep_gbk_mmseqs2, features/prep_clinker.py)"
+when = "config.run_mmseqs2"
+input = ["data/interim/bgcs/{config.project}/{config.antismash_version}"]
+output = ["data/interim/mmseqs2/{config.project}/{config.antismash_version}/gbk_dir"]
+log = "logs/mmseqs2/prep_gbk_mmseqs2_{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "mmseqs2"]
+shell = """
+mkdir -p logs/mmseqs2 2>> {log}
+python scripts/prep_clinker.py "$(ls {input[0]}/*.gbk | tr '\\n' ' ')" {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "prepare_aa_mmseqs2"
+description = "build the CDS faa and the concatenated gbk for mmseqs2/minimap2 (upstream prepare_aa_mmseqs2)"
+when = "config.run_mmseqs2"
+input = ["data/interim/mmseqs2/{config.project}/{config.antismash_version}/gbk_dir"]
+output = [
+    "data/interim/mmseqs2/{config.project}/{config.project}_{config.antismash_version}.faa",
+    "data/interim/minimap2/{config.project}/{config.project}_{config.antismash_version}.gbk",
+]
+log = "logs/mmseqs2/create_aa_{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "mmseqs2"]
+shell = """
+mkdir -p logs/mmseqs2 2>> {log}
+GBKS=$(ls {input[0]}/*.gbk)
+python scripts/create_aa.py "$GBKS" {output[0]} 2>> {log}
+cat {input[0]}/*.gbk > {output[1]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "minimap2"
+description = "all-vs-all nucleotide overlap of the concatenated BGC genbanks (upstream minimap2)"
+when = "config.run_mmseqs2"
+input = ["data/interim/minimap2/{config.project}/{config.project}_{config.antismash_version}.gbk"]
+output = [
+    "data/interim/minimap2/{config.project}/{config.project}_{config.antismash_version}.fna",
+    "data/interim/minimap2/{config.project}/{config.project}_{config.antismash_version}.paf",
+]
+log = "logs/minimap2/{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "mmseqs2"]
+shell = """
+mkdir -p logs/minimap2 2>> {log}
+any2fasta {input[0]} > {output[0]} 2>> {log}
+minimap2 -X -N 50 -p 0.1 -c {output[0]} {output[0]} > {output[1]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/mmseqs2.yaml"
+
+[[rules]]
+name = "mmseqs2_easy_cluster"
+description = "mmseqs easy-cluster over the BGC CDS translations (upstream mmseqs2_easy_cluster)"
+when = "config.run_mmseqs2"
+input = ["data/interim/mmseqs2/{config.project}/{config.project}_{config.antismash_version}.faa"]
+output = ["data/interim/mmseqs2/{config.project}/{config.project}_{config.antismash_version}_cluster.tsv"]
+log = "logs/mmseqs2/build_{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "mmseqs2"]
+shell = """
+mkdir -p logs/mmseqs2 2>> {log}
+tmpdir="data/interim/mmseqs2/tmp/{config.project}_{config.antismash_version}"
+mkdir -p $tmpdir 2>> {log}
+mmseqs easy-cluster {input[0]} data/interim/mmseqs2/{config.project}/{config.project}_{config.antismash_version} $tmpdir -e 1e-5 -c 0.7 2>> {log}
+"""
+[rules.environment]
+conda = "envs/mmseqs2.yaml"
+
+[[rules]]
+name = "mmseqs2"
+description = "mmseqs cluster over the BGC CDS translations (upstream mmseqs2)"
+when = "config.run_mmseqs2"
+input = ["data/interim/mmseqs2/{config.project}/{config.project}_{config.antismash_version}.faa"]
+output = [
+    "data/interim/mmseqs2/{config.project}/{config.project}_{config.antismash_version}.db",
+    "data/interim/mmseqs2/{config.project}/cluster_{config.project}_{config.antismash_version}.db.index",
+    "data/interim/mmseqs2/{config.project}/cluster_{config.project}_{config.antismash_version}.db.dbtype",
+]
+log = "logs/mmseqs2/build_{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "mmseqs2"]
+shell = """
+mkdir -p logs/mmseqs2 2>> {log}
+mmseqs createdb {input[0]} {output[0]} 2>> {log}
+tmpdir="data/interim/mmseqs2/{config.project}/tmp/{config.project}_{config.antismash_version}"
+mkdir -p $tmpdir 2>> {log}
+mmseqs cluster --threads {threads} {output[0]} data/interim/mmseqs2/{config.project}/cluster_{config.project}_{config.antismash_version}.db $tmpdir 2>> {log}
+"""
+[rules.environment]
+conda = "envs/mmseqs2.yaml"
+
+[[rules]]
+name = "mmseqs2_extract"
+description = "extract the mmseqs cluster edge table, MSA and sequence db (upstream mmseqs2_extract)"
+when = "config.run_mmseqs2"
+input = [
+    "data/interim/mmseqs2/{config.project}/{config.project}_{config.antismash_version}.db",
+    "data/interim/mmseqs2/{config.project}/cluster_{config.project}_{config.antismash_version}.db.index",
+]
+output = [
+    "data/processed/{config.project}/mmseqs2/mmseqs2_edge_as_{config.antismash_version}.tsv",
+    "data/interim/mmseqs2/{config.project}/msa_{config.project}_{config.antismash_version}.db",
+    "data/interim/mmseqs2/{config.project}/seq_{config.project}_{config.antismash_version}.db.index",
+]
+log = "logs/mmseqs2/extract_{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "mmseqs2"]
+shell = """
+mkdir -p logs/mmseqs2 2>> {log}
+mmseqs createtsv --threads {threads} {input[0]} {input[0]} data/interim/mmseqs2/{config.project}/cluster_{config.project}_{config.antismash_version}.db {output[0]} 2>> {log}
+mmseqs result2msa --threads {threads} {input[0]} {input[0]} data/interim/mmseqs2/{config.project}/cluster_{config.project}_{config.antismash_version}.db {output[1]} --msa-format-mode 3 2>> {log}
+mmseqs createseqfiledb {input[0]} data/interim/mmseqs2/{config.project}/cluster_{config.project}_{config.antismash_version}.db data/interim/mmseqs2/{config.project}/seq_{config.project}_{config.antismash_version}.db 2>> {log}
+"""
+[rules.environment]
+conda = "envs/mmseqs2.yaml"
+
+[[rules]]
+name = "mmseqs2_extract_cog"
+description = "COG connected components from the mmseqs cluster tsv (upstream mmseqs2_extract_cog, features/mmseqs2_extract.py)"
+when = "config.run_mmseqs2"
+input = ["data/interim/mmseqs2/{config.project}/{config.project}_{config.antismash_version}_cluster.tsv"]
+output = ["data/processed/{config.project}/mmseqs2/as_{config.antismash_version}_mmseqs2_cog.csv"]
+log = "logs/mmseqs2/extract_cog_{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "mmseqs2"]
+shell = """
+mkdir -p logs/mmseqs2 2>> {log}
+python scripts/mmseqs2_extract.py {input[0]} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "mmseqs2_annotate_cog"
+description = "annotate the COG clusters with gbk gene calls (upstream mmseqs2_annotate_cog, features/mmseqs2_annotate.py)"
+when = "config.run_mmseqs2"
+input = [
+    "data/interim/minimap2/{config.project}/{config.project}_{config.antismash_version}.gbk",
+    "data/processed/{config.project}/mmseqs2/as_{config.antismash_version}_mmseqs2_cog.csv",
+]
+output = ["data/processed/{config.project}/mmseqs2/mmseqs2_cog_as_{config.antismash_version}.csv"]
+log = "logs/mmseqs2/annotate_cog_{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "mmseqs2"]
+shell = """
+mkdir -p logs/mmseqs2 2>> {log}
+python scripts/mmseqs2_annotate.py {input[1]} {input[0]} {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"
+
+[[rules]]
+name = "mmseq_all"
+description = "mmseqs2 chain aggregator tag (upstream mmseq_all)"
+when = "config.run_mmseqs2"
+input = [
+    "data/processed/{config.project}/mmseqs2/mmseqs2_cog_as_{config.antismash_version}.csv",
+    "data/interim/mmseqs2/{config.project}/msa_{config.project}_{config.antismash_version}.db",
+    "data/processed/{config.project}/mmseqs2/mmseqs2_edge_as_{config.antismash_version}.tsv",
+    "data/interim/mmseqs2/{config.project}/{config.project}_{config.antismash_version}_cluster.tsv",
+    "data/interim/minimap2/{config.project}/{config.project}_{config.antismash_version}.paf",
+]
+output = ["data/processed/{config.project}/mmseqs2/{config.antismash_version}.tag"]
+log = "logs/mmseqs2/all_{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "mmseqs2"]
+shell = """
+mkdir -p logs/mmseqs2 2>> {log}
+touch {output[0]}
+"""
+[rules.environment]
+conda = "envs/mmseqs2.yaml"
+
+# ---------------------------------------------------------------- getphylo ----
+[[rules]]
+name = "getphylo_prep"
+description = "stage the region genbanks for getphylo (upstream getphylo_prep)"
+when = "config.run_getphylo"
+input = ["data/interim/bgcs/{config.project}/{config.antismash_version}"]
+output = ["data/interim/getphylo/tmp/{config.project}_{config.antismash_version}"]
+log = "logs/getphylo/getphylo_prep_{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "getphylo"]
+shell = """
+mkdir -p logs/getphylo {output[0]} 2>> {log}
+for file in {input[0]}/*.gbk; do
+    cp "$file" {output[0]}/ 2>> {log}
+done
+echo "All files copied successfully!" >> {log}
+"""
+[rules.environment]
+conda = "envs/getphylo.yaml"
+
+[[rules]]
+name = "getphylo"
+description = "BGC comparison with getphylo (diamond+muscle+fasttree; upstream getphylo; upstream uses 8 threads, port uses the global threads)"
+when = "config.run_getphylo"
+input = ["data/interim/getphylo/tmp/{config.project}_{config.antismash_version}"]
+output = ["data/processed/{config.project}/getphylo/as_{config.antismash_version}"]
+log = "logs/getphylo/getphylo_{config.project}_{config.antismash_version}.log"
+tags = ["bgc", "getphylo"]
+shell = """
+mkdir -p logs/getphylo 2>> {log}
+getphylo -g '{input[0]}/*.gbk' -o {output[0]} -c {threads} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/getphylo.yaml"
