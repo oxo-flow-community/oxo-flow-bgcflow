@@ -9,7 +9,8 @@
 # eggnog, gecco, cblaster, arts, bigscape, bigslice, automlst, deeptfactor,
 # lsabgc, alleleome, ppanggolin, antismash v6 branch, prokka_gbk
 # genbank-input path, ncbi_genome_download, write_dependency_versions,
-# clinker, interproscan, mmseqs2, getphylo (BGC comparison entrypoint).
+# clinker, interproscan, mmseqs2, getphylo (BGC comparison entrypoint),
+# create_diamond_db, mlst, refseq_masher, get_project_metadata.
 #
 # NOT ported (with reasons):
 #   - metabase / build_warehouse: separate `bgcflow build warehouse`
@@ -2071,3 +2072,84 @@ getphylo -g '{input[0]}/*.gbk' -o {output[0]} -c {threads} 2>> {log}
 """
 [rules.environment]
 conda = "envs/getphylo.yaml"
+
+# ------------------------------------------- main-path rules w/o gates ----
+# Upstream rules that have NO key in workflow/rules.yaml — unreachable in
+# upstream's own default DAG (documented in the upstream README "Known
+# deviations"); upstream ships them only as Snakefile includes. This port
+# wires them with fresh run_* gates (one config key per tool, default off),
+# following the same gated-branch convention as everything above.
+
+[[rules]]
+name = "create_diamond_db"
+description = "build a diamond DB from the prokka faa files (upstream create_diamond_db; upstream uses 8 threads, port uses the global threads)"
+when = "config.run_diamond"
+expand_inputs = [
+    { pattern = "data/interim/prokka/{sample}/{sample}.faa", variables = { sample = "config.samples_list" } }
+]
+output = [
+    "data/interim/diamond/{config.project}.faa",
+    "data/interim/diamond/{config.project}/{config.project}.dmnd",
+    "data/processed/{config.project}/diamond/{config.project}.dmnd",
+]
+log = "logs/create_diamond_db/create_diamond_db_{config.project}.log"
+tags = ["annotation", "diamond"]
+shell = """
+mkdir -p logs/create_diamond_db data/interim/diamond data/processed/{config.project}/diamond 2>> {log}
+cat {input} > {output[0]} 2>> {log}
+diamond makedb --in {output[0]} -d {output[1]} -p {threads} 2>> {log}
+cp {output[1]} {output[2]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/antismash.yaml"
+
+[[rules]]
+name = "mlst"
+description = "multi-locus sequence typing via pubmlst schemes (upstream mlst)"
+when = "config.run_mlst"
+input = ["data/interim/fasta/{sample}.fna"]
+output = ["data/interim/mlst/{sample}_ST.csv"]
+log = "logs/mlst/mlst-{sample}.log"
+tags = ["annotation", "mlst"]
+shell = """
+mkdir -p logs/mlst data/interim/mlst 2>> {log}
+mlst --csv {input[0]} > {output[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/mlst.yaml"
+
+[[rules]]
+name = "refseq_masher"
+description = "identify closest RefSeq genomes with mash sketches (upstream refseq_masher)"
+when = "config.run_refseq_masher"
+input = ["data/interim/fasta/{sample}.fna"]
+output = ["data/interim/refseq_masher/{sample}_masher.csv"]
+log = "logs/refseq_masher/refseq_masher-{sample}.log"
+tags = ["annotation", "masher"]
+shell = """
+mkdir -p logs/refseq_masher data/interim/refseq_masher 2>> {log}
+refseq_masher matches --output-type csv --top-n-results 10 --output {output[0]} {input[0]} 2>> {log}
+"""
+[rules.environment]
+conda = "envs/refseq_masher.yaml"
+
+[[rules]]
+name = "get_project_metadata"
+# Upstream (bgc_analytics.smk) runs the peppy-based get_project_metadata.py
+# over config/config.yaml + workflow/rules.yaml. This port ships an adapted
+# local port (scripts/get_project_metadata.py: same output JSON —
+# description / rule_used / sample_size / deduped references /
+# bgcflow_version — assembled from main.oxoflow gates + the verbatim
+# config/rules_dict.yaml copy, no peppy dependency; write_dependency_versions
+# consumes project_metadata.json transitively upstream).
+description = "write the project metadata json (upstream get_project_metadata; script ported — unreachable in upstream's own default DAG)"
+when = "config.run_get_project_metadata"
+output = ["data/processed/{config.project}/metadata/project_metadata.json"]
+log = "logs/bgc_analytics/get_{config.project}_metadata.log"
+tags = ["meta"]
+shell = """
+mkdir -p data/processed/{config.project}/metadata logs/bgc_analytics
+python scripts/get_project_metadata.py {config.project} {output[0]} {config.bgcflow_version} 2> {log}
+"""
+[rules.environment]
+conda = "envs/bgc_analytics.yaml"

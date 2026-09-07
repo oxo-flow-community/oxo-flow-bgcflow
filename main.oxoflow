@@ -70,6 +70,13 @@ run_getphylo = false                # upstream workflow/BGC entrypoint, rules_bg
 project_source = "custom"
 ncbi_genera = ""
 write_dependency_versions = false
+# main-path upstream rules without an upstream rules.yaml gate (shipped only
+# as upstream Snakefile includes — unreachable in upstream's default DAG);
+# ported with fresh gates per the gated-branch convention
+run_diamond = false                  # upstream create_diamond_db (rules/diamond.smk)
+run_mlst = false                     # upstream mlst (rules/mlst.smk)
+run_refseq_masher = false            # upstream refseq_masher (rules/refseq_masher.smk)
+run_get_project_metadata = false     # upstream get_project_metadata (rules/bgc_analytics.smk)
 
 [[sample_groups]]
 name = "genomes"
