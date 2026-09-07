@@ -93,17 +93,8 @@
     "Main-path upstream rules without ported counterparts: create_diamond_db (rules/diamond.smk), mlst (rules/mlst.smk), refseq_masher (rules/refseq_masher.smk), get_project_metadata (rules/bgc_analytics.smk) — the port's 42 branches.oxoflow rules cover the documented gate-set, not these",
     "Upstream rules acknowledged group-wise in the README fidelity table without ported counterparts: checkm_out, gtdbtk_fna_fail + evaluate_gtdbtk_input, prokka_db_setup, bigscape_no_mibig + bigscape_to_cytoscape + copy_bigscape (install_bigscape group), arts_extract + 7 arts_* combine/final rules (install pydude... group), roary_reassign_pangene_categories + eggnog_roary + eggnog_roary_result_copy + deeptfactor_roary + diamond_roary, cblaster_bgc_db, antismash_sideload_gecco + gecco_aggregate — see the README fidelity table for the full list"
   ],
-  "rule_count": 60,
-  "tools": [
-    "prokka",
-    "antismash",
-    "python",
-    "pandas",
-    "pyarrow",
-    "biopython",
-    "requests",
-    "alive_progress"
-  ],
+  "rule_count": 121,
+  "tools": ["prokka", "antismash", "python", "pandas", "pyarrow", "biopython", "requests", "alive_progress", "lsaBGC", "Core-Alleleome", "PPanGGOLiN", "clinker", "InterProScan", "mmseqs2", "getphylo"],
   "description": "End-to-end biosynthetic gene cluster (BGC) analysis of user-provided bacterial genomes: prokka annotation, antiSMASH 7 secondary-metabolite mining with automated database setup, per-genome BGC counts and overview tables, GTDB taxonomy lookup, MIBiG reference table download, BigSCAPE-compatible comparison preparation (symlinks, taxonomy, dataset registry, visualization mapping), and conversion of all result tables into a parquet data warehouse — ready for downstream comparison and exploration.",
   "installation": {
     "engine": "oxo-flow >= 0.12.0",
