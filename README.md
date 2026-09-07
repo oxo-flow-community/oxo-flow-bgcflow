@@ -140,20 +140,23 @@ attribution in [NOTICE.md](NOTICE.md).
 | cblaster_genome_db / cblaster_bgc_db | `cblaster_genome_db` | cblaster 1.3.18 | `when = config.run_cblaster`; verbatim makedb over prokka GBKs; cblaster_bgc_db (MIBiG-BGC database build) not ported |
 | gecco / antismash_sideload_gecco / gecco_aggregate | `gecco` | gecco 0.9.10 | `when = config.run_gecco`; verbatim gecco run --antismash-sideload; antismash_sideload_gecco + gecco_aggregate (report tables) not ported |
 | amrfinderplus / amrfinder_gather | `amrfinderplus` / `amrfinder_gather` | ncbi-amrfinderplus | `when = config.run_amrfinderplus`; verbatim flags; gather_amrfinder.py verbatim |
-| create_diamond_db | not ported | diamond | rules/diamond.smk (main Snakefile include): concatenates prokka `.faa` + `diamond makedb`; no ported rule |
-| mlst | not ported | mlst | rules/mlst.smk (main Snakefile include): `mlst --csv` per genome; the port ships `automlst_wrapper` instead (different tool, gated) |
-| refseq_masher | not ported | refseq-masher | rules/refseq_masher.smk (main Snakefile include): `refseq_masher matches --top-n-results 10` |
-| get_project_metadata | not ported | peppy | rules/bgc_analytics.smk; the port only mentions it in a comment (`branches.oxoflow`) |
+| create_diamond_db | `create_diamond_db` | diamond 2.0.15 (antismash env) | `when = config.run_diamond`; upstream has no rules.yaml gate (main-Snakefile include, unreachable in its own default DAG) — ported with a fresh gate; expand_inputs over prokka `.faa` + `diamond makedb`; upstream uses 8 threads, port uses the global threads |
+| mlst | `mlst` | mlst 2.19.0 | `when = config.run_mlst`; upstream has no rules.yaml gate — ported with a fresh gate; `mlst --csv` per genome (pubmlst schemes on demand) |
+| refseq_masher | `refseq_masher` | refseq-masher 0.1.2 | `when = config.run_refseq_masher`; upstream has no rules.yaml gate — ported with a fresh gate; `refseq_masher matches --top-n-results 10` (RefSeq sketch download on first run) |
+| get_project_metadata | `get_project_metadata` | python | `when = config.run_get_project_metadata`; upstream has no rules.yaml gate — ported with a fresh gate; scripts/get_project_metadata.py adapted port (same JSON: description/rule_used/sample_size/references/bgcflow_version; assembled from main.oxoflow gates + the verbatim config/rules_dict.yaml copy, no peppy) |
 | metabase_install / metabase_duckdb_plugin / build_warehouse | not ported | metabase/duckdb | metabase.smk + build-database.smk are not in the main Snakefile; upstream reaches them via its own entrypoint `workflow/Metabase` / `workflow/Database` (`snakemake --snakefile workflow/<Name>`) — no oxo-flow port of those entrypoints. There is no wrapper CLI: `workflow/bgcflow/bgcflow/cli.py` is a console-script stub and the advertised `bgcflow build report` is unimplemented; the warehouse branch additionally needs a live Metabase server + credentials |
 | ncbi_genome_download / extract_ncbi_information (+ patric meta rules) | `ncbi_genome_download` | ncbi-genome-download | `when = config.project_source == 'ncbi'`; deviation: bulk genus download via `--genera` (upstream fetches per-accession with `-A`); extract_ncbi_information / download_patric_tables / extract_patric_meta meta rules not ported |
 | patric_genome_download + patric meta rules | not ported | patric | per-sample source=patric; download endpoint ftp.patricbrc.org is dead (PATRIC decommissioned 2023, merged into BV-BRC; verified 550/connection-refused 2026-08) |
 | copy_custom_genbank / genbank_to_fna + genbank_to_faa / extract_meta_genbank / genbank_to_gff / copy_converted_gbk / summarize_converted_gbk | `copy_custom_genbank` / `genbank_to_fna` | python | gbk-input path (`input_type = 'gbk'`); genbank_to_fna reads the raw gbk directly (upstream uses input-function branching to avoid the producer overlap); the faa/gff/meta/summary extras not ported |
 | report rules (copy_readme, copy_template_notebook, mkdocs_*_report) | not ported | jupyter/mkdocs | separate `bgcflow build report` command, not in the main Snakefile |
 
-Known deviations: the upstream `mlst`, `refseq_masher`, and `diamond` modules
-are unreachable in upstream's own default DAG (no pipeline gate or consumer
-wires them in) and are therefore not ported; `diamond` survives only inside
-the eggnog DB build (`create_dbs.py -m diamond`).
+Known deviations: the upstream `mlst`, `refseq_masher`, `diamond`, and
+`get_project_metadata` rules are unreachable in upstream's own default DAG
+(no rules.yaml gate or consumer wires them in). The port still ships them as
+freshly gated branches (`run_diamond` / `run_mlst` / `run_refseq_masher` /
+`run_get_project_metadata`, all default-off) so the includes are reachable;
+get_project_metadata's script is an adapted port (no peppy). `diamond` also
+survives inside the eggnog DB build (`create_dbs.py -m diamond`).
 
 ## Not ported (per-rule, upstream v1.1.2)
 
@@ -168,8 +171,6 @@ the eggnog DB build (`create_dbs.py -m diamond`).
 - **BGC comparison (workflow/BGC)**: `antismash_colourmap`, `clinker`, `clinker_extract`, `clinker_gene_functions`, `downstream_bgc_prep_selection`, `getphylo`, `getphylo_prep`, `install_interproscan`, `interproscan`, `minimap2`, `mmseq_all`, `mmseqs2`, `mmseqs2_annotate_cog`, `mmseqs2_easy_cluster`, `mmseqs2_extract`, `mmseqs2_extract_cog`, `prep_clinker`, `prep_gbk_mmseqs2`, `prepare_aa_interproscan`, `prepare_aa_mmseqs2`
 
 - **Database (workflow/Database)**: `antismash_db_duckdb`, `antismash_json_extract`, `build_cdss_table`, `build_database`, `build_dna_sequences_table`, `build_regions_table`, `build_warehouse`, `get_dbt_template`
-
-- **main Snakefile gaps (create_diamond_db, mlst, refseq_masher, get_project_metadata)**: `create_diamond_db`, `get_project_metadata`, `mlst`, `refseq_masher`
 
 ## Test
 

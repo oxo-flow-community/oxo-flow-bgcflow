@@ -89,4 +89,36 @@ done
 trap - EXIT
 rm -f .tmp.oxoflow
 
+echo "==> branch-flip: run_diamond=true shows create_diamond_db"
+sed -e 's/^run_diamond = false/run_diamond = true/' main.oxoflow > .tmp.oxoflow
+trap 'rm -f .tmp.oxoflow /tmp/oxo-dryrun-diamond-*.txt' EXIT
+"$OXO" dry-run .tmp.oxoflow --samples first:1 > /tmp/oxo-dryrun-diamond-$$.txt 2>&1
+grep -qE "^  [0-9]+\. create_diamond_db  \[run" /tmp/oxo-dryrun-diamond-$$.txt || { echo "diamond branch: expected create_diamond_db scheduled"; exit 1; }
+trap - EXIT
+rm -f .tmp.oxoflow
+
+echo "==> branch-flip: run_mlst=true shows mlst"
+sed -e 's/^run_mlst = false/run_mlst = true/' main.oxoflow > .tmp.oxoflow
+trap 'rm -f .tmp.oxoflow /tmp/oxo-dryrun-mlst-*.txt' EXIT
+"$OXO" dry-run .tmp.oxoflow --samples first:1 > /tmp/oxo-dryrun-mlst-$$.txt 2>&1
+grep -qE "^  [0-9]+\. mlst_genomes_S1  \[run" /tmp/oxo-dryrun-mlst-$$.txt || { echo "mlst branch: expected mlst scheduled"; exit 1; }
+trap - EXIT
+rm -f .tmp.oxoflow
+
+echo "==> branch-flip: run_refseq_masher=true shows refseq_masher"
+sed -e 's/^run_refseq_masher = false/run_refseq_masher = true/' main.oxoflow > .tmp.oxoflow
+trap 'rm -f .tmp.oxoflow /tmp/oxo-dryrun-masher-*.txt' EXIT
+"$OXO" dry-run .tmp.oxoflow --samples first:1 > /tmp/oxo-dryrun-masher-$$.txt 2>&1
+grep -qE "^  [0-9]+\. refseq_masher_genomes_S1  \[run" /tmp/oxo-dryrun-masher-$$.txt || { echo "masher branch: expected refseq_masher scheduled"; exit 1; }
+trap - EXIT
+rm -f .tmp.oxoflow
+
+echo "==> branch-flip: run_get_project_metadata=true shows get_project_metadata"
+sed -e 's/^run_get_project_metadata = false/run_get_project_metadata = true/' main.oxoflow > .tmp.oxoflow
+trap 'rm -f .tmp.oxoflow /tmp/oxo-dryrun-meta-*.txt' EXIT
+"$OXO" dry-run .tmp.oxoflow --samples first:1 > /tmp/oxo-dryrun-meta-$$.txt 2>&1
+grep -qE "^  [0-9]+\. get_project_metadata  \[run" /tmp/oxo-dryrun-meta-$$.txt || { echo "metadata branch: expected get_project_metadata scheduled"; exit 1; }
+trap - EXIT
+rm -f .tmp.oxoflow
+
 echo "PASS"
