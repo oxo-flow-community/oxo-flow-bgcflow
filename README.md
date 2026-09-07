@@ -140,11 +140,36 @@ attribution in [NOTICE.md](NOTICE.md).
 | cblaster_genome_db / cblaster_bgc_db | `cblaster_genome_db` | cblaster 1.3.18 | `when = config.run_cblaster`; verbatim makedb over prokka GBKs; cblaster_bgc_db (MIBiG-BGC database build) not ported |
 | gecco / antismash_sideload_gecco / gecco_aggregate | `gecco` | gecco 0.9.10 | `when = config.run_gecco`; verbatim gecco run --antismash-sideload; antismash_sideload_gecco + gecco_aggregate (report tables) not ported |
 | amrfinderplus / amrfinder_gather | `amrfinderplus` / `amrfinder_gather` | ncbi-amrfinderplus | `when = config.run_amrfinderplus`; verbatim flags; gather_amrfinder.py verbatim |
-| metabase_install / metabase_duckdb_plugin / build_warehouse | not ported | metabase/duckdb | metabase.smk + build-database.smk are not included in the main Snakefile and are only reachable outside the pipeline (wrapper CLI / manual) — no pipeline gate to mirror; the warehouse branch needs a live Metabase server + credentials |
+| create_diamond_db | not ported | diamond | rules/diamond.smk (main Snakefile include): concatenates prokka `.faa` + `diamond makedb`; no ported rule |
+| mlst | not ported | mlst | rules/mlst.smk (main Snakefile include): `mlst --csv` per genome; the port ships `automlst_wrapper` instead (different tool, gated) |
+| refseq_masher | not ported | refseq-masher | rules/refseq_masher.smk (main Snakefile include): `refseq_masher matches --top-n-results 10` |
+| get_project_metadata | not ported | peppy | rules/bgc_analytics.smk; the port only mentions it in a comment (`branches.oxoflow`) |
+| metabase_install / metabase_duckdb_plugin / build_warehouse | not ported | metabase/duckdb | metabase.smk + build-database.smk are not in the main Snakefile; upstream reaches them via its own entrypoint `workflow/Metabase` / `workflow/Database` (`snakemake --snakefile workflow/<Name>`) — no oxo-flow port of those entrypoints. There is no wrapper CLI: `workflow/bgcflow/bgcflow/cli.py` is a console-script stub and the advertised `bgcflow build report` is unimplemented; the warehouse branch additionally needs a live Metabase server + credentials |
 | ncbi_genome_download / extract_ncbi_information (+ patric meta rules) | `ncbi_genome_download` | ncbi-genome-download | `when = config.project_source == 'ncbi'`; deviation: bulk genus download via `--genera` (upstream fetches per-accession with `-A`); extract_ncbi_information / download_patric_tables / extract_patric_meta meta rules not ported |
 | patric_genome_download + patric meta rules | not ported | patric | per-sample source=patric; download endpoint ftp.patricbrc.org is dead (PATRIC decommissioned 2023, merged into BV-BRC; verified 550/connection-refused 2026-08) |
 | copy_custom_genbank / genbank_to_fna + genbank_to_faa / extract_meta_genbank / genbank_to_gff / copy_converted_gbk / summarize_converted_gbk | `copy_custom_genbank` / `genbank_to_fna` | python | gbk-input path (`input_type = 'gbk'`); genbank_to_fna reads the raw gbk directly (upstream uses input-function branching to avoid the producer overlap); the faa/gff/meta/summary extras not ported |
 | report rules (copy_readme, copy_template_notebook, mkdocs_*_report) | not ported | jupyter/mkdocs | separate `bgcflow build report` command, not in the main Snakefile |
+
+Known deviations: the upstream `mlst`, `refseq_masher`, and `diamond` modules
+are unreachable in upstream's own default DAG (no pipeline gate or consumer
+wires them in) and are therefore not ported; `diamond` survives only inside
+the eggnog DB build (`create_dbs.py -m diamond`).
+
+## Not ported (per-rule, upstream v1.1.2)
+
+- **Group-level gaps (fidelity-table rows)**: `arts_extract`, `arts_allhits_combine`, `arts_bgctable_combine`, `arts_coretable_combine`, `arts_final`, `arts_knownhits_combine`, `checkm_out`, `gtdbtk_fna_fail`, `evaluate_gtdbtk_input`, `prokka_db_setup`, `install_bigscape`, `bigscape_no_mibig`, `bigscape_to_cytoscape`, `copy_bigscape`, `roary_reassign_pangene_categories`, `eggnog_roary`, `eggnog_roary_result_copy`, `deeptfactor_roary`, `diamond_roary`, `cblaster_bgc_db`, `antismash_sideload_gecco`, `gecco_aggregate`
+
+- **PPanGGOLiN (workflow/ppanggolin)**: `ppanggolin_BGC`, `ppanggolin_bgc_prep`, `ppanggolin_genome`, `ppanggolin_genome_borders`, `ppanggolin_genome_draw_spots`, `ppanggolin_genome_draw_tile_plot`, `ppanggolin_genome_draw_tile_plot_nocloud`, `ppanggolin_genome_draw_ucurve`, `ppanggolin_genome_families`, `ppanggolin_genome_gene_pres_abs`, `ppanggolin_genome_gexf`, `ppanggolin_genome_modules`, `ppanggolin_genome_partitions`, `ppanggolin_genome_projection`, `ppanggolin_genome_roary`, `ppanggolin_genome_roary_borders`, `ppanggolin_genome_roary_draw_spots`, `ppanggolin_genome_roary_draw_tile_plot`, `ppanggolin_genome_roary_draw_tile_plot_nocloud`, `ppanggolin_genome_roary_draw_ucurve`, `ppanggolin_genome_roary_families`, `ppanggolin_genome_roary_gene_pres_abs`, `ppanggolin_genome_roary_gexf`, `ppanggolin_genome_roary_modules`, `ppanggolin_genome_roary_partitions`, `ppanggolin_genome_roary_projection`, `ppanggolin_genome_roary_spot_modules`, `ppanggolin_genome_roary_write_regions`, `ppanggolin_genome_roary_write_spots`, `ppanggolin_genome_roary_write_stats`, `ppanggolin_genome_spot_modules`, `ppanggolin_genome_write_regions`, `ppanggolin_genome_write_spots`, `ppanggolin_genome_write_stats`
+
+- **LsABGC (workflow/lsabgc)**: `install_lsabgc_db`, `lsabgc_autoanalyze`, `lsabgc_prepare`, `lsabgc_prepare_tax`, `lsabgc_ready`
+
+- **Alleleome (workflow/Alleleome)**: `alleleome`, `prepare_alleleome`, `prepare_alleleome_fasta`
+
+- **BGC comparison (workflow/BGC)**: `antismash_colourmap`, `clinker`, `clinker_extract`, `clinker_gene_functions`, `downstream_bgc_prep_selection`, `getphylo`, `getphylo_prep`, `install_interproscan`, `interproscan`, `minimap2`, `mmseq_all`, `mmseqs2`, `mmseqs2_annotate_cog`, `mmseqs2_easy_cluster`, `mmseqs2_extract`, `mmseqs2_extract_cog`, `prep_clinker`, `prep_gbk_mmseqs2`, `prepare_aa_interproscan`, `prepare_aa_mmseqs2`
+
+- **Database (workflow/Database)**: `antismash_db_duckdb`, `antismash_json_extract`, `build_cdss_table`, `build_database`, `build_dna_sequences_table`, `build_regions_table`, `build_warehouse`, `get_dbt_template`
+
+- **main Snakefile gaps (create_diamond_db, mlst, refseq_masher, get_project_metadata)**: `create_diamond_db`, `get_project_metadata`, `mlst`, `refseq_masher`
 
 ## Test
 
