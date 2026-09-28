@@ -113,6 +113,9 @@ def summarize_gtdb_json(accession_list, df_gtdb_output):
             [df.loc[:, ["genome_id", "gtdb_release"]], df_taxonomy], axis=1
         )
 
+    # Dropping duplicated columns (e.g. genome_id carried by both df and default metadata)
+    df_final = df_final.loc[:, ~df_final.columns.duplicated()]
+
     # save to file
     logging.info(f"Writing to file: {df_gtdb_output}")
     df_final.to_csv(df_gtdb_output, index=False)
