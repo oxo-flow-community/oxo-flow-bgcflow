@@ -47,15 +47,18 @@ def count_bgcs(gbk_file_path, genome_id=False, outfile=False):
                 else:
                     bgc_type_dict[bgc_type] = 1
 
-                if feat.type == "protocluster":
-                    protoclusters_cntr = protoclusters_cntr + 1
-                if feat.type == "cand_cluster":
-                    cand_clusters_cntr = cand_clusters_cntr + 1
+            elif feat.type == "protocluster":
+                protoclusters_cntr = protoclusters_cntr + 1
+            elif feat.type == "cand_cluster":
+                cand_clusters_cntr = cand_clusters_cntr + 1
 
-                bgc_stats["bgcs_count"] = bgc_cntr
-                bgc_stats["bgcs_on_contig_edge"] = contig_edge_cntr
-                bgc_stats["protoclusters_count"] = protoclusters_cntr
-                bgc_stats["cand_clusters_count"] = cand_clusters_cntr
+        # Per-record update keeps the stats of the last record in multi-record
+        # files, matching the original intent (one output row per genome).
+        if bgc_cntr:
+            bgc_stats["bgcs_count"] = bgc_cntr
+            bgc_stats["bgcs_on_contig_edge"] = contig_edge_cntr
+            bgc_stats["protoclusters_count"] = protoclusters_cntr
+            bgc_stats["cand_clusters_count"] = cand_clusters_cntr
     result = {genome_id: bgc_stats | {"products": bgc_type_dict}}
 
     if not type(outfile) == str:
