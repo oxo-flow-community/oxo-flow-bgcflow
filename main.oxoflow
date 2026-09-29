@@ -253,8 +253,9 @@ set +e
 
 mkdir -p logs/antismash/antismash/{config.antismash_version}
 
-# Find the latest existing JSON output for this strain
-latest_json=$(find data/interim/antismash/*/* -name "{sample}.json" | sort -V | tail -n 1) 2>> logs/antismash/antismash/{config.antismash_version}/antismash_{config.antismash_version}-{sample}.log
+# Find the existing JSON output for this strain in the configured version dir
+# (anchored: a stale JSON from a different antismash_version must never be reused)
+latest_json=$(find data/interim/antismash/{config.antismash_version}/{sample} -maxdepth 1 -name "{sample}.json" 2>> logs/antismash/antismash/{config.antismash_version}/antismash_{config.antismash_version}-{sample}.log | sort -V | tail -n 1)
 if [ -n "$latest_json" ]; then
     # Use existing JSON result as starting point
     echo "Using existing JSON from $latest_json as starting point..." >> logs/antismash/antismash/{config.antismash_version}/antismash_{config.antismash_version}-{sample}.log
